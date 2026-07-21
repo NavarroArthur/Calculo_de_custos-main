@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Banco de dados e backups (sao dados, nao codigo)
+*.db
+backup_*.json
+
+# Ambiente virtual e segredos
+.venv/
+venv/
+.env

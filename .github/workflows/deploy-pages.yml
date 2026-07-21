@@ -1,0 +1,40 @@
+name: Deploy do site (GitHub Pages)
+
+# Publica a pasta web/ no GitHub Pages a cada push na branch main.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:   # permite rodar manualmente pelo botao "Run workflow"
+
+# Permissoes que o GitHub Pages exige
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Evita dois deploys simultaneos
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Baixar o codigo
+        uses: actions/checkout@v4
+
+      - name: Preparar o Pages
+        uses: actions/configure-pages@v5
+
+      - name: Empacotar a pasta do site (web/)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+      - name: Publicar no GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

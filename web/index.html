@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calculadora de Custos - Beneficiamento de Pescados</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script>
+        // Verificar se html2pdf foi carregado corretamente
+        window.addEventListener('load', function() {
+            if (typeof html2pdf !== 'undefined') {
+                console.log('✅ html2pdf carregado com sucesso');
+            } else {
+                console.error('❌ html2pdf não foi carregado');
+            }
+        });
+    </script>
+</head>
+<body>
+    <div class="app-container">
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <i class="fas fa-fish" aria-hidden="true"></i>
+                    <div class="logo-text">
+                        <h1>Calculadora de Custos</h1>
+                        <p class="subtitle">Beneficiamento de Pescados</p>
+                    </div>
+                </div>
+                <!-- HUD de navegacao: fica fixo no topo ao rolar (header sticky) -->
+                <nav class="main-nav" aria-label="Navegação principal">
+                    <button class="nav-btn active" data-tab="calculator">
+                        <i class="fas fa-calculator" aria-hidden="true"></i>
+                        Calculadora
+                    </button>
+                    <button class="nav-btn" data-tab="history">
+                        <i class="fas fa-history" aria-hidden="true"></i>
+                        Histórico
+                        <span class="history-count" id="historyCount" aria-label="cálculos no histórico">0</span>
+                    </button>
+                    <button class="nav-btn" data-tab="produtos">
+                        <i class="fas fa-fish" aria-hidden="true"></i>
+                        Produtos
+                    </button>
+                    <button class="nav-btn" data-tab="config">
+                        <i class="fas fa-gear" aria-hidden="true"></i>
+                        Configurações
+                    </button>
+                    <button class="nav-btn" id="btnLogout" type="button">
+                        <i class="fas fa-right-from-bracket" aria-hidden="true"></i>
+                        Sair
+                    </button>
+                </nav>
+            </div>
+        </header>
+
+        <main class="main-content">
+
+            <div class="tab-content active" id="calculator-tab">
+                <div class="form-container">
+                    <div class="form-header">
+                        <h2><i class="fas fa-calculator" aria-hidden="true"></i> Dados da Produção</h2>
+                        <p>Preencha os dados abaixo para calcular os custos de beneficiamento</p>
+                    </div>
+
+                <form id="calcForm" class="calc-form">
+                    <div class="form-group">
+                        <label for="produto">
+                            <i class="fas fa-fish" aria-hidden="true"></i>
+                            Produto
+                        </label>
+                        <select id="produto" required>
+                            <option value="">Selecione o produto</option>
+                            <option>Filé de merluza</option>
+                            <option>Filé de Panga Com</option>
+                            <option>Filé de Panga Premium</option>
+                            <option>Filé de Saithe</option>
+                            <option>Filé de Polaca</option>
+                            <option>Posta de Cação</option>
+                            <option>Posta de Salmão</option>
+                            <option>Filé de Tilápia</option>
+                            <option>Tentáculos de Lula</option>
+                            <option>Anéis de Lula</option>
+                            <option>Camarão sete barbas</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="categoria">
+                            <i class="fas fa-tags" aria-hidden="true"></i>
+                            Categoria
+                        </label>
+                        <select id="categoria" required>
+                            <option value="">Selecione a categoria</option>
+                            <option value="Mercado">Mercado</option>
+                            <option value="Restaurante">Restaurante</option>
+                        </select>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="preco">
+                                <i class="fas fa-dollar-sign" aria-hidden="true"></i>
+                                Preço por Kg (R$)
+                            </label>
+                            <!-- min/inputmode: barreiras NATIVAS do navegador, antes mesmo do JS -->
+                            <input type="number" id="preco" step="0.01" min="0.01" inputmode="decimal" placeholder="0.00" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="peso_inicial">
+                                <i class="fas fa-weight" aria-hidden="true"></i>
+                                Peso Inicial (Kg)
+                            </label>
+                            <input type="number" id="peso_inicial" step="0.01" min="0.01" inputmode="decimal" placeholder="0.00" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="peso_final">
+                                <i class="fas fa-weight-hanging" aria-hidden="true"></i>
+                                Peso Final (Kg)
+                            </label>
+                            <input type="number" id="peso_final" step="0.01" min="0.01" inputmode="decimal" placeholder="0.00" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="sacos_de_gelo">
+                                <i class="fas fa-snowflake" aria-hidden="true"></i>
+                                Sacos de Gelo
+                            </label>
+                            <input type="number" id="sacos_de_gelo" min="0" inputmode="numeric" placeholder="0" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="caixa_papelao">
+                            <i class="fas fa-box" aria-hidden="true"></i>
+                            Caixas de Papelão
+                        </label>
+                        <input type="number" id="caixa_papelao" min="0" inputmode="numeric" placeholder="0" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="preco_venda">
+                            <i class="fas fa-hand-holding-dollar" aria-hidden="true"></i>
+                            Preço de venda por Kg (R$) &mdash; opcional
+                        </label>
+                        <input type="number" id="preco_venda" step="0.01" min="0" inputmode="decimal" placeholder="Deixe vazio para não calcular a margem">
+                    </div>
+
+                    <button type="submit" class="calculate-btn">
+                        <i class="fas fa-calculator" aria-hidden="true"></i>
+                        Calcular Custos
+                        <div class="btn-loading" id="btnLoading">
+                            <i class="fas fa-spinner fa-spin" aria-hidden="true"></i>
+                        </div>
+                    </button>
+                </form>
+            </div>
+
+                    <div id="resultado" class="result-container hidden">
+                        <div class="result-header">
+                            <h3><i class="fas fa-chart-line" aria-hidden="true"></i> Resultado do Cálculo</h3>
+                            <!-- aria-label: o botao so tem um icone, entao precisa de um nome acessivel -->
+                            <button class="close-result" id="closeResult" aria-label="Fechar resultado">
+                                <i class="fas fa-times" aria-hidden="true"></i>
+                            </button>
+                        </div>
+                        <div class="result-content" id="resultContent"></div>
+                    </div>
+                </div>
+
+            <div class="tab-content" id="history-tab">
+                <div class="history-container">
+                    <div class="history-header">
+                        <h2><i class="fas fa-history" aria-hidden="true"></i> Histórico de Cálculos</h2>
+                        <div class="history-actions">
+                            <button class="action-btn secondary" onclick="limparHistorico()">
+                                <i class="fas fa-trash" aria-hidden="true"></i>
+                                Limpar Histórico
+                            </button>
+                            <button class="action-btn secondary" onclick="exportarHistorico()">
+                                <i class="fas fa-download" aria-hidden="true"></i>
+                                Exportar Histórico
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Busca e filtros do historico -->
+                    <div class="history-filters">
+                        <div class="filter-field">
+                            <label for="filtroProduto">Produto</label>
+                            <input type="search" id="filtroProduto" placeholder="Buscar produto...">
+                        </div>
+                        <div class="filter-field">
+                            <label for="filtroCategoria">Categoria</label>
+                            <select id="filtroCategoria">
+                                <option value="">Todas</option>
+                                <option value="Mercado">Mercado</option>
+                                <option value="Restaurante">Restaurante</option>
+                            </select>
+                        </div>
+                        <div class="filter-field">
+                            <label for="filtroDe">De</label>
+                            <input type="date" id="filtroDe">
+                        </div>
+                        <div class="filter-field">
+                            <label for="filtroAte">Até</label>
+                            <input type="date" id="filtroAte">
+                        </div>
+                        <button type="button" class="action-btn secondary" id="btnLimparFiltros">
+                            <i class="fas fa-xmark" aria-hidden="true"></i>
+                            Limpar
+                        </button>
+                    </div>
+
+                    <div class="history-list" id="historyList">
+                        <div class="empty-history">
+                            <i class="fas fa-history" aria-hidden="true"></i>
+                            <h3>Nenhum cálculo realizado ainda</h3>
+                            <p>Realize seu primeiro cálculo para ver o histórico aqui</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Aba de Configuracoes: edita os precos dos insumos -->
+            <div class="tab-content" id="config-tab">
+                <div class="form-container">
+                    <div class="form-header">
+                        <h2><i class="fas fa-gear" aria-hidden="true"></i> Configurações</h2>
+                        <p>Altere os preços dos insumos usados nos cálculos. Eles ficam salvos no banco.</p>
+                    </div>
+                    <form id="configForm" class="calc-form">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="cfg_gelo">
+                                    <i class="fas fa-snowflake" aria-hidden="true"></i>
+                                    Preço do saco de gelo (R$)
+                                </label>
+                                <input type="number" id="cfg_gelo" step="0.01" min="0" inputmode="decimal" placeholder="0.00" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="cfg_papelao">
+                                    <i class="fas fa-box" aria-hidden="true"></i>
+                                    Preço da caixa de papelão (R$)
+                                </label>
+                                <input type="number" id="cfg_papelao" step="0.01" min="0" inputmode="decimal" placeholder="0.00" required>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="cfg_fita">
+                                <i class="fas fa-tape" aria-hidden="true"></i>
+                                Preço da fita durex (R$)
+                            </label>
+                            <input type="number" id="cfg_fita" step="0.01" min="0" inputmode="decimal" placeholder="0.00" required>
+                        </div>
+                        <button type="submit" class="calculate-btn">
+                            <i class="fas fa-save" aria-hidden="true"></i>
+                            Salvar Configurações
+                        </button>
+                    </form>
+
+                    <!-- Backup do banco de dados -->
+                    <div class="produtos-section">
+                        <h3><i class="fas fa-database" aria-hidden="true"></i> Backup do banco</h3>
+                        <p class="produtos-hint">Baixe uma cópia do banco para o seu computador. É o backup que sobrevive a qualquer problema no servidor. Faça isso com frequência.</p>
+                        <div class="backup-acoes">
+                            <button type="button" class="action-btn primary" id="btnBaixarBackup">
+                                <i class="fas fa-download" aria-hidden="true"></i>
+                                Baixar backup (.db)
+                            </button>
+                            <button type="button" class="action-btn secondary" id="btnBackupServidor">
+                                <i class="fas fa-server" aria-hidden="true"></i>
+                                Criar cópia no servidor
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Aba de Produtos: lista completa + perfil de cada produto -->
+            <div class="tab-content" id="produtos-tab">
+                <div class="form-container">
+                    <div class="form-header">
+                        <h2><i class="fas fa-fish" aria-hidden="true"></i> Produtos</h2>
+                        <p>Gerencie seus produtos: preço, validade, fornecedor e mais. Clique em "Perfil" para ver os detalhes e o histórico de preços e validades.</p>
+                    </div>
+
+                    <div class="produtos-toolbar">
+                        <input type="search" id="buscaProduto" placeholder="Buscar produto..." aria-label="Buscar produto">
+                        <span class="produtos-contador" id="produtosContador"></span>
+                    </div>
+                    <div id="listaProdutos" class="produtos-lista"></div>
+
+                    <form id="formNovoProduto" class="produto-novo">
+                        <input type="text" id="novoProdutoNome" placeholder="Nome do novo produto" aria-label="Nome do novo produto">
+                        <input type="number" id="novoProdutoPreco" step="0.01" min="0" inputmode="decimal" placeholder="Preço/Kg" aria-label="Preço por Kg do novo produto">
+                        <button type="submit" class="action-btn primary">
+                            <i class="fas fa-plus" aria-hidden="true"></i>
+                            Adicionar produto
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <!-- Atalhos de navegacao no rodape (mesma acao do HUD do topo) -->
+            <nav class="footer-nav" aria-label="Navegação do rodapé">
+                <button class="nav-btn footer-nav-btn" data-tab="calculator">
+                    <i class="fas fa-calculator" aria-hidden="true"></i>
+                    Calculadora
+                </button>
+                <button class="nav-btn footer-nav-btn" data-tab="history">
+                    <i class="fas fa-history" aria-hidden="true"></i>
+                    Histórico
+                </button>
+            </nav>
+            <p class="footer-credits">
+                Desenvolvido por <strong>Arthur</strong> &middot; Calculadora de Custos
+                <span class="footer-version" id="footerVersion"></span>
+            </p>
+        </footer>
+    </div>
+
+    <!-- role="status" + aria-live="polite": faz o leitor de tela ANUNCIAR as notificacoes -->
+    <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true">
+        <div class="toast-content">
+            <i class="toast-icon" aria-hidden="true"></i>
+            <span class="toast-message"></span>
+        </div>
+    </div>
+
+    <!-- Tela de login (cobre tudo enquanto não autenticado) -->
+    <div class="modal-overlay" id="loginOverlay">
+        <div class="modal login-box">
+            <div class="modal-header">
+                <h3><i class="fas fa-fish" aria-hidden="true"></i> Calculadora de Custos</h3>
+            </div>
+            <div class="modal-body">
+                <form id="loginForm" class="calc-form">
+                    <div class="form-group">
+                        <label for="login_email">E-mail</label>
+                        <input type="email" id="login_email" autocomplete="username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="login_senha">Senha</label>
+                        <input type="password" id="login_senha" autocomplete="current-password" required>
+                    </div>
+                    <button type="submit" class="calculate-btn">
+                        <i class="fas fa-right-to-bracket" aria-hidden="true"></i>
+                        Entrar
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de perfil do produto -->
+    <div class="modal-overlay hidden" id="produtoModal">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitulo">
+            <div class="modal-header">
+                <h3 id="modalTitulo"><i class="fas fa-id-card" aria-hidden="true"></i> Perfil do produto</h3>
+                <button class="close-result" id="fecharModalProduto" aria-label="Fechar">
+                    <i class="fas fa-times" aria-hidden="true"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="perfilForm" class="calc-form">
+                    <input type="hidden" id="perfil_id">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="perfil_nome">Nome</label>
+                            <input type="text" id="perfil_nome" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="perfil_preco">Preço por Kg (R$)</label>
+                            <input type="number" id="perfil_preco" step="0.01" min="0" inputmode="decimal">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="perfil_categoria">Categoria / Tipo</label>
+                            <input type="text" id="perfil_categoria" placeholder="Ex.: Filé, Posta, Frutos do mar">
+                        </div>
+                        <div class="form-group">
+                            <label for="perfil_fornecedor">Fornecedor / Marca</label>
+                            <input type="text" id="perfil_fornecedor">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="perfil_lote">Lote</label>
+                            <input type="text" id="perfil_lote" placeholder="Ex.: L2026-045">
+                        </div>
+                        <div class="form-group">
+                            <label for="perfil_fabricacao">Fabricação</label>
+                            <input type="date" id="perfil_fabricacao">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="perfil_validade">Validade</label>
+                            <input type="date" id="perfil_validade">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="perfil_observacoes">Observações</label>
+                        <textarea id="perfil_observacoes" rows="2"></textarea>
+                    </div>
+                </form>
+
+                <div class="historico-precos">
+                    <h4><i class="fas fa-clock-rotate-left" aria-hidden="true"></i> Histórico de alterações</h4>
+                    <div id="listaHistorico"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-produto btn-excluir" id="btnExcluirPerfil">
+                    <i class="fas fa-trash" aria-hidden="true"></i> Excluir produto
+                </button>
+                <button type="button" class="btn-produto btn-salvar" id="btnSalvarPerfil">
+                    <i class="fas fa-save" aria-hidden="true"></i> Salvar alterações
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

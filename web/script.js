@@ -3,7 +3,7 @@
 // Um unico lugar para a URL do back-end. Em producao, TROQUE a linha abaixo
 // pela URL real do seu deploy no Railway (ex.: https://seuapp.up.railway.app/api).
 // ---------------------------------------------------------------------------
-const PRODUCTION_API_URL = 'https://arthur.pythonanywhere.com/api/health'; 
+const PRODUCTION_API_URL = 'https://arthur.pythonanywhere.com/api'; 
 const rodandoLocal = ['localhost', '127.0.0.1'].includes(window.location.hostname);
 const API_BASE_URL = rodandoLocal ? 'http://localhost:5000/api' : PRODUCTION_API_URL;
 

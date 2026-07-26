@@ -1,156 +1,160 @@
 # 🚀 Guia de Deploy — Calculadora de Custos
 
-Este guia leva o programa do seu computador para a internet, com segurança.
+Publica o programa na internet, com segurança. A escolha aqui:
 
-## Como o sistema é dividido
+- **Site (pasta `web/`)** → **GitHub Pages** (arquivos estáticos).
+- **API + banco (`api.py`, `database.py`, `calculos.py`)** → **PythonAnywhere** (grátis, sempre no ar, com armazenamento que persiste — o SQLite sobrevive).
 
-O projeto tem **duas partes** que rodam em lugares diferentes:
+> Os dois conversam pela internet: o site (GitHub Pages) chama a API (PythonAnywhere) via `fetch`.
+> *(Alternativas para a API: Render ou Railway. Mas no plano grátis deles o disco é efêmero/precisa pagar. O PythonAnywhere guarda os dados de graça.)*
 
-- **Front-end (o site)** → vai para o **GitHub Pages**. É a pasta `web/` (HTML, CSS, JS). É o que o usuário abre no navegador. O GitHub Pages só serve arquivos estáticos — e o site é exatamente isso.
-- **Back-end (a API + banco)** → vai para o **Railway** (ou Render). É o `api.py` + `database.py` + `calculos.py`. Roda o Python e guarda o banco.
-
-> ⚠️ **Importante:** o GitHub Pages **não** roda Python nem hospeda banco de dados — ele só entrega arquivos prontos. Por isso a API e o banco precisam ficar num servidor de verdade (Railway/Render). Não dá para colocar o banco "no GitHub".
-
-Os dois conversam pela internet: o site (GitHub Pages) chama a API (Railway) via `fetch`.
+Troque **`SEU_USUARIO`** pelo seu nome de usuário do PythonAnywhere em todos os lugares.
 
 ---
 
-## ✅ Antes de começar
+## Parte 1 — Subir a API no PythonAnywhere
 
-- [ ] O código está no GitHub (o `.gitignore` já ignora `*.db` e backups).
-- [ ] Você tem conta no **Railway** (railway.app). Dá para entrar com o GitHub.
-- [ ] Gere uma **SECRET_KEY** aleatória. No terminal:
-  ```bash
-  python -c "import secrets; print(secrets.token_hex(32))"
-  ```
-  Copie o resultado (sequência longa) e guarde.
+### 1.1 Criar a conta
+Crie uma conta **grátis (Beginner)** em **pythonanywhere.com**.
 
----
-
-## Parte 1 — Publicar a API no Railway
-
-### 1.1 Criar o projeto
-1. No Railway: **New Project → Deploy from GitHub repo** e escolha este repositório.
-2. O Railway detecta o `Procfile` sozinho e sobe a API com o **gunicorn**. Não precisa configurar comando.
-
-### 1.2 Variáveis de ambiente
-No serviço → aba **Variables**, adicione:
-
-| Variável | Valor | Para quê |
-| --- | --- | --- |
-| `SECRET_KEY` | (a chave aleatória gerada) | Assina os tokens de login |
-| `ADMIN_SENHA` | (a senha que você quer para o admin) | Sua senha de acesso |
-| `ADMIN_EMAIL` | (opcional) ex.: `voce@empresa.com` | E-mail do admin (padrão: `admin@calculadora.local`) |
-| `FRONTEND_URL` | (preencha na Parte 3) | Restringe o CORS ao seu site |
-
-> Não defina `FLASK_ENV=development` em produção (o debug fica desligado, que é o correto).
-
-### 1.3 Banco de dados persistente (MUITO importante)
-O disco do Railway é **efêmero**: a cada deploy ele é apagado, e o banco junto. Para não perder dados:
-
-1. No serviço → **Settings → Volumes → New Volume**. Monte num caminho, ex.: **`/data`**.
-2. Adicione a variável:
-
-   | Variável | Valor |
-   | --- | --- |
-   | `DATABASE_URL` | `/data/calculos_beneficiamento.db` |
-
-   Assim o banco fica no volume persistente e sobrevive aos deploys.
-
-### 1.4 Pegar a URL da API
-Em **Settings → Networking → Generate Domain**. Vai gerar algo como:
+### 1.2 Baixar o código (via Git)
+No menu **Consoles → Bash**, abra um terminal e rode:
+```bash
+git clone https://github.com/NavarroArthur/Calculo_de_custos-main.git
 ```
-https://seu-projeto.up.railway.app
+
+### 1.3 Criar o ambiente virtual e instalar as dependências
+Ainda no Bash:
+```bash
+mkvirtualenv --python=/usr/bin/python3.10 calc-env
+pip install -r Calculo_de_custos-main/requirements.txt
 ```
-Guarde — é o endereço da sua API.
+Guarde o nome do ambiente: **`calc-env`**.
 
-### 1.5 Testar
-Abra no navegador: `https://seu-projeto.up.railway.app/api/health`.
-Deve aparecer um JSON com `"status": "ok"`. Se aparecer, a API está no ar. 🎉
+### 1.4 Criar o Web app
+1. Vá na aba **Web → Add a new web app**.
+2. Em framework, escolha **Manual configuration** (não escolha "Flask") → **Python 3.10**.
 
-> **Alternativa ao Railway:** o **Render** (render.com) funciona igual — crie um *Web Service*, aponte para o repo, use o *Start Command* `gunicorn api:app`, um **Disk** persistente para o banco, e as mesmas variáveis.
+### 1.5 Configurar o Web app
+Na página do Web app, preencha:
+
+- **Source code:** `/home/SEU_USUARIO/Calculo_de_custos-main`
+- **Working directory:** `/home/SEU_USUARIO/Calculo_de_custos-main`
+- **Virtualenv:** `/home/SEU_USUARIO/.virtualenvs/calc-env`
+
+### 1.6 Editar o arquivo WSGI (é aqui que a mágica acontece)
+Clique no link do **WSGI configuration file** (algo como `/var/www/SEU_USUARIO_pythonanywhere_com_wsgi.py`). **Apague tudo** e coloque:
+
+```python
+import os
+import sys
+
+# --- Variáveis de ambiente (segredos ficam AQUI, no servidor, fora do Git) ---
+os.environ['SECRET_KEY'] = 'COLE_AQUI_UMA_CHAVE_ALEATORIA_LONGA'
+os.environ['ADMIN_SENHA'] = 'a-senha-que-voce-quer'
+os.environ['ADMIN_EMAIL'] = 'voce@exemplo.com'  # opcional
+os.environ['FRONTEND_URL'] = 'https://navarroarthur.github.io'
+# Caminho ABSOLUTO do banco (garante que ele persista sempre no mesmo lugar)
+os.environ['DATABASE_URL'] = '/home/SEU_USUARIO/Calculo_de_custos-main/calculos_beneficiamento.db'
+
+# --- Deixa o Python achar o api.py ---
+caminho = '/home/SEU_USUARIO/Calculo_de_custos-main'
+if caminho not in sys.path:
+    sys.path.insert(0, caminho)
+
+# --- Carrega o app Flask ---
+from api import app as application
+```
+
+> Para gerar a `SECRET_KEY`, rode no seu PC: `python -c "import secrets; print(secrets.token_hex(32))"` e cole o resultado.
+
+### 1.7 Recarregar e testar
+1. Volte na aba **Web** e clique no botão verde **Reload**.
+2. Abra no navegador: `https://SEU_USUARIO.pythonanywhere.com/api/health`
+3. Deve aparecer `{"status": "ok", ...}`. Se aparecer, a API e o banco estão no ar. 🎉
+
+> Se der erro, veja o **Error log** (link na aba Web) — ele mostra a linha exata do problema.
 
 ---
 
 ## Parte 2 — Publicar o site no GitHub Pages
 
 ### 2.1 Apontar o site para a API
-No arquivo **`web/script.js`**, no topo, troque o placeholder pela URL do Railway (com `/api` no final):
-
+No **`web/script.js`**, no topo, troque o placeholder pela URL do PythonAnywhere (com `/api` no fim):
 ```javascript
-const PRODUCTION_API_URL = 'https://seu-projeto.up.railway.app/api'; // <-- sua URL do Railway
+const PRODUCTION_API_URL = 'https://SEU_USUARIO.pythonanywhere.com/api';
+```
+Faça `commit` e `push` (pelo terminal do VS Code):
+```bash
+git add web/script.js
+git commit -m "Aponta o site para a API no PythonAnywhere"
+git push
 ```
 
-Faça o commit e o push.
-
 ### 2.2 Ligar o GitHub Pages
-Este projeto já tem um workflow em `.github/workflows/deploy-pages.yml` que publica a pasta `web/` sozinho.
-
+Este projeto já tem o workflow `.github/workflows/deploy-pages.yml` que publica a pasta `web/`.
 1. No GitHub, vá em **Settings → Pages**.
-2. Em **Build and deployment → Source**, escolha **GitHub Actions**.
-3. Pronto. A cada push na `main`, o workflow publica o site. Você acompanha em **Actions**.
+2. Em **Source**, escolha **GitHub Actions**.
+3. A cada `push` na `main`, o site é publicado. Acompanhe na aba **Actions**.
 
 ### 2.3 Pegar a URL do site
-Depois do primeiro deploy, o endereço aparece em **Settings → Pages**. Para um repositório de projeto, é algo como:
+Em **Settings → Pages**, aparece algo como:
 ```
 https://navarroarthur.github.io/Calculo_de_custos-main/
 ```
 
 ---
 
-## Parte 3 — Conectar os dois (fechar o CORS)
+## Parte 3 — Conferir a conexão (CORS)
 
-1. Volte no Railway → **Variables** e defina o `FRONTEND_URL` com a **origem** do seu site — ou seja, só `https://usuario.github.io`, **sem** o caminho do repositório:
+No arquivo WSGI (Parte 1.6), o `FRONTEND_URL` deve ser a **origem** do site — só `https://navarroarthur.github.io`, **sem** o `/Calculo_de_custos-main/`. Se você já colocou certo, ótimo. Se mudar, edite o WSGI e clique em **Reload** de novo.
 
-   | Variável | Valor |
-   | --- | --- |
-   | `FRONTEND_URL` | `https://navarroarthur.github.io` |
-
-   > Por que sem o `/Calculo_de_custos-main/`? Porque o CORS olha só o **domínio** (esquema + host), não o caminho. Colocar o caminho aqui quebraria a checagem.
-
-2. O Railway reinicia a API. Agora ela só aceita chamadas vindas do seu site.
-
-Ciclo fechado: site no GitHub Pages → API no Railway → banco no volume persistente.
+> Por quê sem o caminho? O CORS olha só o domínio (esquema + host), não o caminho.
 
 ---
 
 ## Parte 4 — Primeiro acesso e rotina
 
-- **Login:** abra o site, entre com o e-mail do admin (`ADMIN_EMAIL` ou `admin@calculadora.local`) e a `ADMIN_SENHA`.
-- **Backup:** em **Configurações → Backup do banco → Baixar backup (.db)**, e guarde o arquivo. Faça isso **com frequência** — é o seu seguro.
+- **Login:** abra o site, entre com o e-mail do admin e a `ADMIN_SENHA` que você pôs no WSGI.
+- **Backup:** em **Configurações → Backup do banco → Baixar backup (.db)**. Faça isso com frequência.
+
+---
+
+## 🔄 Como atualizar o sistema depois
+
+Quando você mudar o código no PC e der `push` no GitHub:
+
+- **Site:** o GitHub Pages atualiza sozinho (o workflow roda no push).
+- **API:** entre no **Bash** do PythonAnywhere e rode:
+  ```bash
+  cd Calculo_de_custos-main
+  git pull
+  ```
+  Depois vá na aba **Web** e clique em **Reload**.
 
 ---
 
 ## 🧯 Problemas comuns
 
-**"Failed to fetch" ao usar o site**
-A API não respondeu. Cheque: (1) a `PRODUCTION_API_URL` no `script.js` está correta e com `/api` no fim? (2) `https://.../api/health` abre? (3) a `FRONTEND_URL` no Railway está com a origem certa?
+**"Failed to fetch" no site**
+A API não respondeu. Cheque: (1) `PRODUCTION_API_URL` no `script.js` está certa e com `/api`? (2) `https://SEU_USUARIO.pythonanywhere.com/api/health` abre? (3) fez **Reload** no PythonAnywhere?
 
 **Erro de CORS no console (F12)**
-A `FRONTEND_URL` está diferente da origem do site (barra a mais, http vs https, caminho junto). Use só `https://usuario.github.io`.
+O `FRONTEND_URL` (no WSGI) está diferente da origem do site. Use só `https://navarroarthur.github.io` e dê Reload.
 
-**O site abre mas as telas/estilos não carregam**
-No GitHub Pages o site fica num subcaminho (`/nome-do-repo/`). Os arquivos do projeto usam caminhos relativos (`style.css`, `script.js`), então funcionam — mas se você adicionar links começando com `/`, eles quebram. Prefira caminhos relativos.
+**"Something went wrong" / erro 500 no PythonAnywhere**
+Veja o **Error log** na aba Web — a última linha diz o que quebrou (caminho errado no WSGI, dependência faltando, etc.).
 
-**Os dados sumiram depois de um deploy**
-Faltou o **volume persistente** (Parte 1.3) ou a `DATABASE_URL` não aponta para dentro dele.
-
-**Trocar a senha do admin**
-Mude `ADMIN_SENHA` no Railway e faça um redeploy.
+**A conta grátis "expira"**
+No plano grátis, o PythonAnywhere pede para você **renovar o web app a cada ~3 meses** (é um clique na aba Web). Só isso.
 
 ---
 
 ## 🔒 Checklist antes de divulgar a URL
 
-- [ ] `SECRET_KEY` definida (aleatória e longa).
-- [ ] `ADMIN_SENHA` definida (não é mais `admin123`).
-- [ ] `FRONTEND_URL` definida com a origem do GitHub Pages (CORS restrito).
-- [ ] Volume persistente + `DATABASE_URL` configurados.
+- [ ] `SECRET_KEY` no WSGI (aleatória e longa).
+- [ ] `ADMIN_SENHA` no WSGI (não é mais `admin123`).
+- [ ] `FRONTEND_URL` no WSGI = origem do GitHub Pages.
+- [ ] `DATABASE_URL` no WSGI = caminho absoluto do `.db`.
 - [ ] `https://.../api/health` responde e o login funciona.
 - [ ] Primeiro backup baixado e guardado.
-
----
-
-## 🧠 Se a empresa crescer
-
-O SQLite é ótimo para começar. Se um dia forem muitos acessos simultâneos, o passo natural é migrar para **PostgreSQL** (o Railway oferece com um clique). Por enquanto, SQLite + volume persistente + backup regular é suficiente.

@@ -73,6 +73,16 @@ body {
     display: flex;
     align-items: center;
     gap: 0.85rem;
+    cursor: pointer;                 /* o logo agora e clicavel (volta a Calculadora) */
+    transition: var(--transition);
+    border-radius: var(--radius-lg);
+    padding: 0.2rem;
+}
+.logo:hover { transform: translateY(-1px); }
+.logo:hover .logo-badge { box-shadow: 0 6px 18px rgba(37, 99, 235, 0.45); }
+.logo:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
 }
 
 .logo-text {
@@ -80,21 +90,33 @@ body {
     flex-direction: column;
 }
 
-.logo i {
-    font-size: 2rem;
-    color: var(--primary-color);
-    filter: drop-shadow(0 2px 4px rgba(37, 99, 235, 0.3));
+/* Icone do peixe dentro de um "badge" com o gradiente da marca (cara de app). */
+.logo-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.7rem;
+    height: 2.7rem;
+    border-radius: 14px;
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+    transition: var(--transition);
+}
+.logo-badge i {
+    font-size: 1.35rem;
+    color: #fff;
 }
 
 .logo h1 {
-    font-size: 1.6rem;
+    font-size: 1.5rem;
     font-weight: 700;
     background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
     margin: 0;
-    line-height: 1.2;
+    line-height: 1.15;
+    letter-spacing: -0.3px;
 }
 
 .subtitle {
@@ -1282,3 +1304,498 @@ select:focus-visible {
         margin-left: 0;
     }
 }
+
+/* ===========================================================================
+   DATEPICKER CUSTOMIZADO
+   Usa as mesmas variaveis do :root pra combinar com o resto do app.
+   =========================================================================== */
+
+/* Wrapper que embrulha o <input type=date>: ancora o popup (absolute). */
+.dp-wrapper {
+    position: relative;
+    display: block;
+    width: 100%;
+}
+
+/* O input em si continua com o estilo do app; so damos espaco pro icone
+   e deixamos claro que e clicavel (cursor de ponteiro, sem cursor de texto). */
+.dp-wrapper input[type="date"] {
+    width: 100%;
+    padding-right: 2.4rem;   /* espaco pro icone da direita */
+    cursor: pointer;
+}
+
+/* Esconde o icone/relogio nativo do date input (Chrome/Edge). */
+.dp-wrapper input[type="date"]::-webkit-calendar-picker-indicator {
+    display: none;
+    -webkit-appearance: none;
+}
+
+/* Icone de calendario nosso, no canto direito do campo. */
+.dp-icone {
+    position: absolute;
+    right: 0.85rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-light);
+    pointer-events: auto;    /* clicavel: tambem abre o calendario */
+    cursor: pointer;
+    font-size: 0.95rem;
+}
+.dp-wrapper.dp-aberto .dp-icone { color: var(--primary-color); }
+
+/* O popup do calendario. */
+.dp-popup {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 50;
+    width: 17rem;
+    max-width: 90vw;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    padding: 0.75rem;
+    animation: dpAbrir 0.12s ease-out;
+}
+@keyframes dpAbrir {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Cabecalho: ‹  Julho 2034  › */
+.dp-cabecalho {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+}
+.dp-nav {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 1.25rem;
+    line-height: 1;
+    width: 2rem;
+    height: 2rem;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: var(--transition);
+}
+.dp-nav:hover { background: var(--border-light); color: var(--primary-color); }
+.dp-titulo {
+    border: none;
+    background: transparent;
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text-primary);
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    border-radius: var(--radius-md);
+    transition: var(--transition);
+}
+.dp-titulo:hover { background: var(--border-light); }
+
+/* Grades (dias e meses) em CSS grid. */
+.dp-grade { display: grid; gap: 2px; }
+.dp-grade-dias  { grid-template-columns: repeat(7, 1fr); }
+.dp-grade-meses { grid-template-columns: repeat(3, 1fr); gap: 0.4rem; }
+
+/* Cabecalho dos dias da semana. */
+.dp-dow {
+    text-align: center;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-light);
+    padding: 0.25rem 0;
+    text-transform: uppercase;
+}
+
+/* Celula de dia. */
+.dp-dia {
+    border: none;
+    background: transparent;
+    aspect-ratio: 1 / 1;
+    border-radius: var(--radius-md);
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: var(--transition);
+}
+.dp-dia:hover:not(.dp-vazio) { background: var(--border-light); }
+.dp-vazio { cursor: default; }
+
+/* Dia de hoje: contorno. Dia escolhido: fundo azul cheio. */
+.dp-hoje { box-shadow: inset 0 0 0 1px var(--primary-color); }
+.dp-selecionado,
+.dp-selecionado:hover {
+    background: var(--primary-color);
+    color: #fff;
+    font-weight: 600;
+}
+
+/* Celula de mes (modo meses, igual a imagem). */
+.dp-mes {
+    border: none;
+    background: transparent;
+    padding: 0.6rem 0;
+    border-radius: var(--radius-md);
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: var(--transition);
+}
+.dp-mes:hover { background: var(--border-light); }
+
+
+/* ===========================================================================
+   MELHORIAS DE CAMPOS E FILTROS
+   =========================================================================== */
+
+/* --- 1) INPUT-GROUP: unidade (R$ / Kg) dentro do campo ------------------- */
+.input-group {
+    position: relative;
+    display: block;
+    width: 100%;
+}
+.input-group input {
+    width: 100%;
+}
+/* Prefixo (esquerda) e sufixo (direita): texto fixo, nao clicavel. */
+.input-prefixo,
+.input-sufixo {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-size: 0.9rem;
+    pointer-events: none;      /* clique passa direto pro input */
+}
+.input-prefixo { left: 1rem; }
+.input-sufixo  { right: 1rem; }
+/* Abre espaco no input pra o texto nao ficar por cima do que se digita. */
+.input-group.tem-prefixo input { padding-left: 2.6rem; }
+.input-group.tem-sufixo  input { padding-right: 2.8rem; }
+
+/* --- 4) LABEL reage ao foco do campo (sem JS, so :focus-within) ---------- */
+.form-group:focus-within > label,
+.filter-field:focus-within > label {
+    color: var(--primary-color);
+}
+.form-group:focus-within > label i { color: var(--primary-color); }
+
+/* --- 9) BUSCA com icone de lupa dentro do campo -------------------------- */
+.input-busca { position: relative; width: 100%; }
+.input-busca i {
+    position: absolute;
+    left: 0.85rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-light);
+    font-size: 0.9rem;
+    pointer-events: none;
+}
+.input-busca input {
+    width: 100%;
+    padding-left: 2.3rem;   /* espaco pra lupa */
+}
+
+/* --- 5) PRESETS de periodo (Hoje / 7 dias / Este mes) -------------------- */
+.filtros-presets {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0.75rem 0 0.25rem;
+}
+.presets-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-right: 0.25rem;
+}
+.preset-btn {
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-weight: 500;
+    padding: 0.35rem 0.8rem;
+    border-radius: 999px;      /* pilula */
+    cursor: pointer;
+    transition: var(--transition);
+}
+.preset-btn:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    background: rgba(37, 99, 235, 0.06);
+}
+
+/* --- 7 e 8) STATUS dos filtros: chips ativos + contador ------------------ */
+.filtros-status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    min-height: 1.75rem;       /* evita "pulo" no layout quando vazio */
+    margin-bottom: 0.5rem;
+}
+.filtros-ativos {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: rgba(37, 99, 235, 0.1);
+    color: var(--primary-dark);
+    border: 1px solid rgba(37, 99, 235, 0.2);
+    font-size: 0.78rem;
+    font-weight: 500;
+    padding: 0.2rem 0.3rem 0.2rem 0.65rem;
+    border-radius: 999px;
+}
+.chip-x {
+    border: none;
+    background: transparent;
+    color: var(--primary-dark);
+    font-size: 1rem;
+    line-height: 1;
+    width: 1.1rem;
+    height: 1.1rem;
+    border-radius: 50%;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+}
+.chip-x:hover { background: rgba(37, 99, 235, 0.2); }
+.filtros-info {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+/* --- 9) Botao "Limpar" desabilitado quando nao ha filtro ----------------- */
+.action-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* --- 2) Mensagem de erro de validacao (polimento do que ja existe) ------- */
+.erro-validacao::before {
+    content: "\f06a";                 /* icone de alerta (Font Awesome) */
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+}
+
+
+/* ===========================================================================
+   10) MODO ESCURO AUTOMATICO
+   Como TUDO usa as variaveis do :root, o tema escuro e so redefinir essas
+   variaveis. O navegador escolhe pela preferencia do sistema do usuario.
+   =========================================================================== */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --text-primary:   #e5e7eb;
+        --text-secondary: #9ca3af;
+        --text-light:     #6b7280;
+        --bg-primary:     #0f172a;   /* fundo geral */
+        --bg-secondary:   #1e293b;   /* cards, inputs, popups */
+        --border-color:   #334155;
+        --border-light:   #273449;
+        /* sombras mais densas para dar profundidade no escuro */
+        --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+        --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.5);
+        --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.55);
+        --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.6);
+    }
+    /* A seta do <select> era cinza fixa; deixa clara pra aparecer no escuro. */
+    select {
+        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%239ca3af' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3e%3c/svg%3e");
+    }
+}
+
+
+/* ===========================================================================
+   HUD DE NAVEGACAO (botao + menu suspenso)
+   Substitui a barra de abas fixa e o rodape duplicado.
+   =========================================================================== */
+/* margin-left:auto empurra o HUD para a DIREITA do header. */
+.nav-hud { position: relative; margin-left: auto; }
+
+/* Botao-pill com o gradiente da marca (igual ao botao "Calcular Custos"). */
+.hud-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-width: 190px;
+    padding: 0.62rem 1.1rem;
+    border: none;
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    color: #fff;
+    border-radius: 999px;
+    font-family: inherit;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition);
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
+}
+.hud-toggle:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(37, 99, 235, 0.45); }
+.hud-toggle:active { transform: translateY(0); }
+.hud-toggle.aberto { box-shadow: 0 6px 20px rgba(37, 99, 235, 0.45); }
+.hud-toggle .fa-bars { font-size: 0.9rem; opacity: 0.95; }
+.hud-toggle .hud-current { display: inline-flex; align-items: center; gap: 0.4rem; flex: 1; }
+/* O icone da aba dentro do botao e redundante com o hamburguer -> escondemos. */
+.hud-toggle .hud-current i { display: none; }
+.hud-caret { font-size: 0.72rem; opacity: 0.9; transition: transform 0.2s ease; }
+.hud-toggle.aberto .hud-caret { transform: rotate(180deg); }
+
+/* Menu suspenso, estilo card (cantos 16px, sombra forte, setinha apontando). */
+.hud-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 10px);
+    min-width: 262px;
+    max-width: calc(100vw - 2rem);
+    z-index: 200;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-light);
+    border-radius: 16px;
+    box-shadow: var(--shadow-xl);
+    padding: 0.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    animation: dpAbrir 0.14s ease-out;   /* reusa a animacao do datepicker */
+}
+/* Setinha (notch) ligando o menu ao botao. */
+.hud-menu::before {
+    content: "";
+    position: absolute;
+    top: -6px;
+    right: 26px;
+    width: 12px;
+    height: 12px;
+    background: var(--bg-secondary);
+    border-left: 1px solid var(--border-light);
+    border-top: 1px solid var(--border-light);
+    transform: rotate(45deg);
+}
+/* IMPORTANTE: como definimos display:flex acima, a regra padrao do navegador
+   [hidden]{display:none} perde para a nossa. Precisamos reafirmar aqui, senao
+   o menu apareceria mesmo com o atributo 'hidden'. */
+.hud-menu[hidden] { display: none; }
+
+/* Itens do menu: largura total, alinhados a esquerda, com hover suave. */
+.hud-menu .nav-btn {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 0.75rem;
+    padding: 0.72rem 0.85rem;
+    border-radius: var(--radius-md);
+    font-size: 0.92rem;
+    color: var(--text-secondary);
+}
+.hud-menu .nav-btn i {
+    width: 1.15rem;
+    text-align: center;
+    font-size: 0.95rem;
+    color: var(--text-light);
+    transition: var(--transition);
+}
+.hud-menu .nav-btn:hover { background: var(--bg-primary); color: var(--text-primary); }
+.hud-menu .nav-btn:hover i { color: var(--primary-color); }
+/* Aba ativa: gradiente cheio da marca. */
+.hud-menu .nav-btn.active {
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    color: #fff;
+    box-shadow: var(--shadow-sm);
+}
+.hud-menu .nav-btn.active i { color: #fff; }
+/* O contador do historico vai pra direita dentro do item. */
+.hud-menu .nav-btn .history-count { margin-left: auto; }
+
+/* "Sair" com cara de acao destrutiva (vermelho). */
+.hud-menu #btnLogout,
+.hud-menu #btnLogout i { color: var(--error-color); }
+.hud-menu #btnLogout:hover { background: rgba(239, 68, 68, 0.08); color: var(--error-color); }
+
+.hud-sep {
+    height: 1px;
+    background: var(--border-light);
+    margin: 0.4rem 0.2rem;
+}
+.hud-credits {
+    font-size: 0.72rem;
+    color: var(--text-light);
+    text-align: center;
+    padding: 0.55rem 0.25rem 0.15rem;
+}
+
+
+/* ===========================================================================
+   SELECAO DO HISTORICO (checkboxes + barra + botao exportar)
+   =========================================================================== */
+
+/* Barra acima da lista: selecionar todos / contador / exportar. */
+.history-selection {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    padding: 0.85rem 2rem;
+    background: var(--bg-primary);
+    border-bottom: 1px solid var(--border-light);
+}
+.sel-todos {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.88rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+.sel-count {
+    font-size: 0.82rem;
+    color: var(--text-light);
+}
+.history-selection #btnExportarSelecionados { margin-left: auto; }
+
+/* Botao primario (gradiente da marca) para acoes principais. */
+.action-btn.primary {
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    color: #fff;
+    border: none;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+}
+.action-btn.primary:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4); }
+
+/* Checkbox dentro de cada item do historico. */
+.history-check-wrap {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.15rem 0.6rem 0 0;
+    cursor: pointer;
+}
+.history-check {
+    width: 1.15rem;
+    height: 1.15rem;
+    cursor: pointer;
+    accent-color: var(--primary-color);   /* deixa o check azul da marca */
+}
+
+/* Checkboxes de selecao maiores tambem no "selecionar todos". */
+#selecionarTodos { width: 1.05rem; height: 1.05rem; accent-color: var(--primary-color); cursor: pointer; }
+
+/* O header do item agora comeca com o checkbox; garante alinhamento no topo. */
+.history-item .history-item-header { align-items: flex-start; }

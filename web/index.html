@@ -4,57 +4,64 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Calculadora de Custos - Beneficiamento de Pescados</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=9">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <!-- jsPDF: unica dependencia de PDF (o html2pdf foi removido, nao era mais usado) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script>
-        // Verificar se html2pdf foi carregado corretamente
-        window.addEventListener('load', function() {
-            if (typeof html2pdf !== 'undefined') {
-                console.log('✅ html2pdf carregado com sucesso');
-            } else {
-                console.error('❌ html2pdf não foi carregado');
-            }
-        });
-    </script>
 </head>
 <body>
     <div class="app-container">
         <header class="header">
             <div class="header-content">
-                <div class="logo">
-                    <i class="fas fa-fish" aria-hidden="true"></i>
+                <div class="logo" id="logoHome" role="button" tabindex="0"
+                     aria-label="Ir para a Calculadora" title="Voltar para a Calculadora">
+                    <span class="logo-badge"><i class="fas fa-fish" aria-hidden="true"></i></span>
                     <div class="logo-text">
                         <h1>Calculadora de Custos</h1>
                         <p class="subtitle">Beneficiamento de Pescados</p>
                     </div>
                 </div>
-                <!-- HUD de navegacao: fica fixo no topo ao rolar (header sticky) -->
-                <nav class="main-nav" aria-label="Navegação principal">
-                    <button class="nav-btn active" data-tab="calculator">
-                        <i class="fas fa-calculator" aria-hidden="true"></i>
-                        Calculadora
+                <!-- HUD de navegacao: um botao que abre o menu de abas ao clicar -->
+                <div class="nav-hud">
+                    <button class="hud-toggle" id="hudToggle" type="button"
+                            aria-haspopup="true" aria-expanded="false" aria-controls="hudMenu">
+                        <i class="fas fa-bars" aria-hidden="true"></i>
+                        <span class="hud-current" id="hudCurrent">
+                            <i class="fas fa-calculator" aria-hidden="true"></i> Calculadora
+                        </span>
+                        <i class="fas fa-chevron-down hud-caret" aria-hidden="true"></i>
                     </button>
-                    <button class="nav-btn" data-tab="history">
-                        <i class="fas fa-history" aria-hidden="true"></i>
-                        Histórico
-                        <span class="history-count" id="historyCount" aria-label="cálculos no histórico">0</span>
-                    </button>
-                    <button class="nav-btn" data-tab="produtos">
-                        <i class="fas fa-fish" aria-hidden="true"></i>
-                        Produtos
-                    </button>
-                    <button class="nav-btn" data-tab="config">
-                        <i class="fas fa-gear" aria-hidden="true"></i>
-                        Configurações
-                    </button>
-                    <button class="nav-btn" id="btnLogout" type="button">
-                        <i class="fas fa-right-from-bracket" aria-hidden="true"></i>
-                        Sair
-                    </button>
-                </nav>
+
+                    <div class="hud-menu" id="hudMenu" role="menu" aria-label="Navegação principal" hidden>
+                        <button class="nav-btn active" data-tab="calculator" role="menuitem">
+                            <i class="fas fa-calculator" aria-hidden="true"></i>
+                            Calculadora
+                        </button>
+                        <button class="nav-btn" data-tab="history" role="menuitem">
+                            <i class="fas fa-history" aria-hidden="true"></i>
+                            Histórico
+                            <span class="history-count" id="historyCount" aria-label="cálculos no histórico">0</span>
+                        </button>
+                        <button class="nav-btn" data-tab="produtos" role="menuitem">
+                            <i class="fas fa-fish" aria-hidden="true"></i>
+                            Produtos
+                        </button>
+                        <button class="nav-btn" data-tab="config" role="menuitem">
+                            <i class="fas fa-gear" aria-hidden="true"></i>
+                            Configurações
+                        </button>
+                        <div class="hud-sep"></div>
+                        <button class="nav-btn" id="btnLogout" type="button" role="menuitem">
+                            <i class="fas fa-right-from-bracket" aria-hidden="true"></i>
+                            Sair
+                        </button>
+                        <div class="hud-credits">
+                            Desenvolvido por <strong>Arthur</strong>
+                            <span class="footer-version" id="footerVersion"></span>
+                        </div>
+                    </div>
+                </div>
             </div>
         </header>
 
@@ -108,7 +115,10 @@
                                 Preço por Kg (R$)
                             </label>
                             <!-- min/inputmode: barreiras NATIVAS do navegador, antes mesmo do JS -->
-                            <input type="number" id="preco" step="0.01" min="0.01" inputmode="decimal" placeholder="0.00" required>
+                            <div class="input-group tem-prefixo">
+                                <span class="input-prefixo">R$</span>
+                                <input type="number" id="preco" step="0.01" min="0.01" inputmode="decimal" placeholder="0.00" required>
+                            </div>
                         </div>
 
                         <div class="form-group">
@@ -116,7 +126,10 @@
                                 <i class="fas fa-weight" aria-hidden="true"></i>
                                 Peso Inicial (Kg)
                             </label>
-                            <input type="number" id="peso_inicial" step="0.01" min="0.01" inputmode="decimal" placeholder="0.00" required>
+                            <div class="input-group tem-sufixo">
+                                <input type="number" id="peso_inicial" step="0.01" min="0.01" inputmode="decimal" placeholder="0.00" required>
+                                <span class="input-sufixo">Kg</span>
+                            </div>
                         </div>
                     </div>
 
@@ -126,7 +139,10 @@
                                 <i class="fas fa-weight-hanging" aria-hidden="true"></i>
                                 Peso Final (Kg)
                             </label>
-                            <input type="number" id="peso_final" step="0.01" min="0.01" inputmode="decimal" placeholder="0.00" required>
+                            <div class="input-group tem-sufixo">
+                                <input type="number" id="peso_final" step="0.01" min="0.01" inputmode="decimal" placeholder="0.00" required>
+                                <span class="input-sufixo">Kg</span>
+                            </div>
                         </div>
 
                         <div class="form-group">
@@ -151,7 +167,10 @@
                             <i class="fas fa-hand-holding-dollar" aria-hidden="true"></i>
                             Preço de venda por Kg (R$) &mdash; opcional
                         </label>
-                        <input type="number" id="preco_venda" step="0.01" min="0" inputmode="decimal" placeholder="Deixe vazio para não calcular a margem">
+                        <div class="input-group tem-prefixo">
+                            <span class="input-prefixo">R$</span>
+                            <input type="number" id="preco_venda" step="0.01" min="0" inputmode="decimal" placeholder="Deixe vazio para não calcular a margem">
+                        </div>
                     </div>
 
                     <button type="submit" class="calculate-btn">
@@ -196,7 +215,10 @@
                     <div class="history-filters">
                         <div class="filter-field">
                             <label for="filtroProduto">Produto</label>
-                            <input type="search" id="filtroProduto" placeholder="Buscar produto...">
+                            <div class="input-busca">
+                                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                                <input type="search" id="filtroProduto" placeholder="Buscar produto...">
+                            </div>
                         </div>
                         <div class="filter-field">
                             <label for="filtroCategoria">Categoria</label>
@@ -217,6 +239,33 @@
                         <button type="button" class="action-btn secondary" id="btnLimparFiltros">
                             <i class="fas fa-xmark" aria-hidden="true"></i>
                             Limpar
+                        </button>
+                    </div>
+
+                    <!-- Atalhos rapidos de periodo (preenchem De/Ate) -->
+                    <div class="filtros-presets">
+                        <span class="presets-label"><i class="fas fa-bolt" aria-hidden="true"></i> Periodo:</span>
+                        <button type="button" class="preset-btn" data-preset="hoje">Hoje</button>
+                        <button type="button" class="preset-btn" data-preset="7dias">7 dias</button>
+                        <button type="button" class="preset-btn" data-preset="mes">Este mes</button>
+                    </div>
+
+                    <!-- Chips de filtro ativo + contador de resultados -->
+                    <div class="filtros-status">
+                        <div class="filtros-ativos" id="filtrosAtivos"></div>
+                        <span class="filtros-info" id="historyResultsInfo" aria-live="polite"></span>
+                    </div>
+
+                    <!-- Barra de selecao: marcar itens e exportar um PDF unico -->
+                    <div class="history-selection">
+                        <label class="sel-todos">
+                            <input type="checkbox" id="selecionarTodos">
+                            Selecionar todos
+                        </label>
+                        <span class="sel-count" id="selCount" aria-live="polite">0 selecionados</span>
+                        <button type="button" class="action-btn primary" id="btnExportarSelecionados" disabled>
+                            <i class="fas fa-file-pdf" aria-hidden="true"></i>
+                            Exportar selecionados (PDF)
                         </button>
                     </div>
 
@@ -311,23 +360,6 @@
             </div>
         </main>
 
-        <footer class="footer">
-            <!-- Atalhos de navegacao no rodape (mesma acao do HUD do topo) -->
-            <nav class="footer-nav" aria-label="Navegação do rodapé">
-                <button class="nav-btn footer-nav-btn" data-tab="calculator">
-                    <i class="fas fa-calculator" aria-hidden="true"></i>
-                    Calculadora
-                </button>
-                <button class="nav-btn footer-nav-btn" data-tab="history">
-                    <i class="fas fa-history" aria-hidden="true"></i>
-                    Histórico
-                </button>
-            </nav>
-            <p class="footer-credits">
-                Desenvolvido por <strong>Arthur</strong> &middot; Calculadora de Custos
-                <span class="footer-version" id="footerVersion"></span>
-            </p>
-        </footer>
     </div>
 
     <!-- role="status" + aria-live="polite": faz o leitor de tela ANUNCIAR as notificacoes -->
@@ -433,6 +465,15 @@
         </div>
     </div>
 
-    <script src="script.js"></script>
+    <script src="datepicker.js?v=9"></script>
+    <script src="melhorias.js?v=9"></script>
+    <script src="menu-hud.js?v=9"></script>
+    <!-- Logica extraida do script.js (carregada antes dele) -->
+    <script src="calculo.js?v=9"></script>
+    <script src="validacao.js?v=9"></script>
+    <script src="script.js?v=9"></script>
+    <!-- Carregados DEPOIS do script.js para sobrescrever a exportacao de PDF -->
+    <script src="pdf-relatorio.js?v=9"></script>
+    <script src="historico-selecao.js?v=9"></script>
 </body>
 </html>

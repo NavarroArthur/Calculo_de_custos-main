@@ -1799,3 +1799,62 @@ select:focus-visible {
 
 /* O header do item agora comeca com o checkbox; garante alinhamento no topo. */
 .history-item .history-item-header { align-items: flex-start; }
+
+
+/* ===========================================================================
+   BOTOES DE ACAO (.action-btn) — estilo BASE que faltava
+   Conserta os botoes "crus": Exportar Resultado, Novo Calculo, Limpar/Exportar
+   Historico e Exportar selecionados. Um base + variantes.
+   =========================================================================== */
+.action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.62rem 1.15rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-sm);
+    font-family: inherit;
+    font-size: 0.9rem;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: var(--transition);
+}
+.action-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+.action-btn:active { transform: translateY(0); }
+.action-btn i { font-size: 0.9rem; }
+
+/* Secundario = mesmo do base (mantido por clareza semantica no HTML). */
+.action-btn.secondary { background: var(--bg-secondary); color: var(--text-primary); }
+
+/* No HEADER azul do historico, os botoes viram "frosted" (claros sobre o azul). */
+.history-header .action-btn {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.35);
+    color: #fff;
+    box-shadow: none;
+}
+.history-header .action-btn:hover {
+    background: rgba(255, 255, 255, 0.28);
+    border-color: #fff;
+    color: #fff;
+}
+
+/* Area dos botoes no painel de resultado: espaçamento e alinhamento. */
+.result-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    justify-content: center;
+    margin-top: 1.5rem;
+}

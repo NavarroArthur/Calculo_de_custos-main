@@ -72,10 +72,11 @@ function initDatePicker(input) {
     if (!input || input.dataset.dpInit === '1') return;
     input.dataset.dpInit = '1'; // marca como "ja inicializado"
 
-    // 1) READONLY: impede o usuario de digitar e impede o navegador de abrir
-    //    o calendario NATIVO. O .value continua legivel e gravavel por codigo,
-    //    entao o contrato ISO nao muda em nada.
-    input.readOnly = true;
+    // 1) DIGITACAO LIBERADA: o input continua sendo type="date" nativo, entao o
+    //    usuario pode DIGITAR a data direto no campo — o navegador ja valida e
+    //    escreve o ISO no .value, disparando 'input'/'change' sozinho. Por isso
+    //    NAO usamos mais readOnly. O calendario customizado abre pelo ICONE (e
+    //    nao ao clicar no campo), pra nao atrapalhar quem quer digitar.
 
     // 2) WRAPPER: embrulha o input numa div com position:relative, pra que o
     //    popup (position:absolute) apareca colado embaixo do campo certo.
@@ -278,12 +279,17 @@ function initDatePicker(input) {
         wrapper.classList.remove('dp-aberto');
     }
 
-    // Clicar no campo (input ou icone) abre; se ja aberto, fecha (toggle).
+    // O calendario abre/fecha pelo ICONE. O campo fica livre para digitar.
     function alternar() {
         if (popup.hidden) abrir(); else fechar();
     }
-    input.addEventListener('click', alternar);
     icone.addEventListener('click', alternar);
+
+    // BUG FIX: cliques DENTRO do popup (setas, titulo, mes) nao podem "vazar"
+    // ate o listener de "clique fora". Como o desenhar() recria o conteudo do
+    // popup, o elemento clicado sai do DOM e o wrapper.contains() daria false,
+    // fechando o popup a cada clique. stopPropagation resolve isso.
+    popup.addEventListener('click', (evento) => evento.stopPropagation());
 
     // Fecha ao clicar FORA do wrapper. Checamos se o alvo do clique esta
     // dentro do nosso wrapper; se nao estiver, fecha.

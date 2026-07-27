@@ -1322,7 +1322,7 @@ select:focus-visible {
 .dp-wrapper input[type="date"] {
     width: 100%;
     padding-right: 2.4rem;   /* espaco pro icone da direita */
-    cursor: pointer;
+    cursor: text;            /* o campo agora aceita digitacao */
 }
 
 /* Esconde o icone/relogio nativo do date input (Chrome/Edge). */

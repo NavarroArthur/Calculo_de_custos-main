@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Calculadora de Custos - Beneficiamento de Pescados</title>
-    <link rel="stylesheet" href="style.css?v=10">
+    <link rel="stylesheet" href="style.css?v=12">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- jsPDF: unica dependencia de PDF (o html2pdf foi removido, nao era mais usado) -->
@@ -414,7 +414,10 @@
                         </div>
                         <div class="form-group">
                             <label for="perfil_preco">Preço por Kg (R$)</label>
-                            <input type="number" id="perfil_preco" step="0.01" min="0" inputmode="decimal">
+                            <div class="input-group tem-prefixo">
+                                <span class="input-prefixo">R$</span>
+                                <input type="number" id="perfil_preco" step="0.01" min="0" inputmode="decimal">
+                            </div>
                         </div>
                     </div>
                     <div class="form-row">
@@ -443,6 +446,40 @@
                             <input type="date" id="perfil_validade">
                         </div>
                     </div>
+
+                    <!-- Embalagem: quantidade + unidade + peso por unidade -> peso total (calculado) -->
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="perfil_quantidade">Quantidade da embalagem</label>
+                            <input type="number" id="perfil_quantidade" step="0.01" min="0" inputmode="decimal"
+                                   placeholder="Ex.: 10" oninput="calcPesoTotalPerfil()">
+                        </div>
+                        <div class="form-group">
+                            <label for="perfil_unidade">Unidade</label>
+                            <select id="perfil_unidade" onchange="calcPesoTotalPerfil()">
+                                <option value="">—</option>
+                                <option value="Unidade">Unidade</option>
+                                <option value="Pacote">Pacote</option>
+                                <option value="Caixa">Caixa</option>
+                                <option value="Kg">Kg</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="perfil_peso_unitario">Peso por unidade (Kg)</label>
+                            <div class="input-group tem-sufixo">
+                                <input type="number" id="perfil_peso_unitario" step="0.001" min="0" inputmode="decimal"
+                                       placeholder="Ex.: 1" oninput="calcPesoTotalPerfil()">
+                                <span class="input-sufixo">Kg</span>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="perfil_peso_total">Peso total (calculado)</label>
+                            <input type="text" id="perfil_peso_total" readonly placeholder="—">
+                        </div>
+                    </div>
+
                     <div class="form-group">
                         <label for="perfil_observacoes">Observações</label>
                         <textarea id="perfil_observacoes" rows="2"></textarea>
@@ -465,15 +502,15 @@
         </div>
     </div>
 
-    <script src="datepicker.js?v=10"></script>
-    <script src="melhorias.js?v=10"></script>
-    <script src="menu-hud.js?v=10"></script>
+    <script src="datepicker.js?v=12"></script>
+    <script src="melhorias.js?v=12"></script>
+    <script src="menu-hud.js?v=12"></script>
     <!-- Logica extraida do script.js (carregada antes dele) -->
-    <script src="calculo.js?v=10"></script>
-    <script src="validacao.js?v=10"></script>
-    <script src="script.js?v=10"></script>
+    <script src="calculo.js?v=12"></script>
+    <script src="validacao.js?v=12"></script>
+    <script src="script.js?v=12"></script>
     <!-- Carregados DEPOIS do script.js para sobrescrever a exportacao de PDF -->
-    <script src="pdf-relatorio.js?v=10"></script>
-    <script src="historico-selecao.js?v=10"></script>
+    <script src="pdf-relatorio.js?v=12"></script>
+    <script src="historico-selecao.js?v=12"></script>
 </body>
 </html>

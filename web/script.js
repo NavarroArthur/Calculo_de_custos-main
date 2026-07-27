@@ -768,6 +768,11 @@ async function abrirPerfilProduto(id) {
         document.getElementById('perfil_lote').value = produto.lote || '';
         document.getElementById('perfil_fabricacao').value = produto.fabricacao || '';
         document.getElementById('perfil_observacoes').value = produto.observacoes || '';
+        // Embalagem (quantidade + unidade + peso por unidade) e o total calculado
+        document.getElementById('perfil_quantidade').value = produto.quantidade ?? '';
+        document.getElementById('perfil_unidade').value = produto.unidade || '';
+        document.getElementById('perfil_peso_unitario').value = produto.peso_unitario ?? '';
+        calcPesoTotalPerfil();
         renderHistorico(historico);
 
         document.getElementById('produtoModal').classList.remove('hidden');
@@ -832,6 +837,20 @@ function formatarData(iso) {
 }
 
 // Salva as alteracoes do perfil (PUT). Se o preco mudar, o historico e recarregado.
+// Calcula o "Peso total" da embalagem ao vivo no modal do perfil.
+// Regra: se ha peso por unidade, total = quantidade x peso_unitario (ex.: 10 x 1 = 10 Kg).
+// Senao, se a unidade ja e "Kg", o total e a propria quantidade.
+function calcPesoTotalPerfil() {
+    const q = parseFloat(document.getElementById('perfil_quantidade').value) || 0;
+    const pu = parseFloat(document.getElementById('perfil_peso_unitario').value) || 0;
+    const uni = document.getElementById('perfil_unidade').value;
+    let totalKg = 0;
+    if (pu > 0) totalKg = q * pu;
+    else if (uni === 'Kg') totalKg = q;
+    const out = document.getElementById('perfil_peso_total');
+    if (out) out.value = totalKg > 0 ? arredondar(totalKg, 3) + ' Kg' : '';
+}
+
 async function salvarPerfilProduto() {
     if (!perfilAtualId) return;
     const corpo = {
@@ -842,7 +861,11 @@ async function salvarPerfilProduto() {
         fornecedor: document.getElementById('perfil_fornecedor').value.trim(),
         lote: document.getElementById('perfil_lote').value.trim(),
         fabricacao: document.getElementById('perfil_fabricacao').value,
-        observacoes: document.getElementById('perfil_observacoes').value.trim()
+        observacoes: document.getElementById('perfil_observacoes').value.trim(),
+        // Embalagem: numeros vazios viram null (nao sobrescrevem); unidade vazia ('') limpa
+        quantidade: parseFloat(document.getElementById('perfil_quantidade').value) || null,
+        unidade: document.getElementById('perfil_unidade').value || '',
+        peso_unitario: parseFloat(document.getElementById('perfil_peso_unitario').value) || null
     };
     try {
         const response = await fetch(`${API_BASE_URL}/produtos/${perfilAtualId}`, {

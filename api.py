@@ -373,6 +373,9 @@ def criar_produto():
             lote=data.get('lote') or None,
             fabricacao=data.get('fabricacao') or None,
             observacoes=data.get('observacoes') or None,
+            quantidade=data.get('quantidade'),
+            unidade=data.get('unidade') or None,
+            peso_unitario=data.get('peso_unitario'),
         )
         return jsonify({'success': True, 'produto_id': produto_id}), 201
     except ValueError as e:
@@ -393,7 +396,8 @@ def atualizar_produto(produto_id):
             campos['preco_kg'] = float(data['preco_kg'])
             if campos['preco_kg'] < 0:
                 return jsonify({'error': 'O preço não pode ser negativo'}), 400
-        for chave in ('validade', 'fornecedor', 'categoria', 'lote', 'fabricacao', 'observacoes'):
+        for chave in ('validade', 'fornecedor', 'categoria', 'lote', 'fabricacao', 'observacoes',
+                      'quantidade', 'unidade', 'peso_unitario'):
             if chave in data:
                 campos[chave] = data.get(chave)
         db.atualizar_produto(produto_id, **campos)

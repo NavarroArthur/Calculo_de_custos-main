@@ -232,10 +232,16 @@ class DatabaseManager:
         'lote': 'TEXT',
         'fabricacao': 'TEXT',
         'observacoes': 'TEXT',
+        # Embalagem: quantidade + unidade + peso de cada unidade (em Kg).
+        # Ex.: quantidade=10, unidade='Pacote', peso_unitario=1  -> 10 Kg no total.
+        'quantidade': 'REAL',
+        'unidade': 'TEXT',
+        'peso_unitario': 'REAL',
     }
     # Whitelist dos campos que o usuário pode editar (usada para montar o UPDATE com segurança).
     CAMPOS_EDITAVEIS_PRODUTO = ['nome', 'preco_kg', 'validade', 'fornecedor',
-                                'categoria', 'lote', 'fabricacao', 'observacoes']
+                                'categoria', 'lote', 'fabricacao', 'observacoes',
+                                'quantidade', 'unidade', 'peso_unitario']
 
     def _migrar_colunas_produtos(self, cursor):
         """Adiciona as colunas de perfil na tabela produtos, se ainda não existirem.
@@ -324,7 +330,8 @@ class DatabaseManager:
         cursor = conn.cursor()
         try:
             cursor.execute('''
-                SELECT id, nome, preco_kg, validade, fornecedor, categoria, lote, fabricacao, observacoes
+                SELECT id, nome, preco_kg, validade, fornecedor, categoria, lote, fabricacao, observacoes,
+                       quantidade, unidade, peso_unitario
                 FROM produtos ORDER BY nome
             ''')
             return [dict(row) for row in cursor.fetchall()]
@@ -338,7 +345,8 @@ class DatabaseManager:
         cursor = conn.cursor()
         try:
             cursor.execute('''
-                SELECT id, nome, preco_kg, validade, fornecedor, categoria, lote, fabricacao, observacoes
+                SELECT id, nome, preco_kg, validade, fornecedor, categoria, lote, fabricacao, observacoes,
+                       quantidade, unidade, peso_unitario
                 FROM produtos WHERE id = ?
             ''', (produto_id,))
             row = cursor.fetchone()
@@ -347,15 +355,18 @@ class DatabaseManager:
             conn.close()
 
     def criar_produto(self, nome, preco_kg=0, validade=None, fornecedor=None,
-                      categoria=None, lote=None, fabricacao=None, observacoes=None):
+                      categoria=None, lote=None, fabricacao=None, observacoes=None,
+                      quantidade=None, unidade=None, peso_unitario=None):
         """Cria um novo produto. Levanta ValueError se o nome já existir."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         try:
             cursor.execute('''
-                INSERT INTO produtos (nome, preco_kg, validade, fornecedor, categoria, lote, fabricacao, observacoes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (nome, preco_kg, validade, fornecedor, categoria, lote, fabricacao, observacoes))
+                INSERT INTO produtos (nome, preco_kg, validade, fornecedor, categoria, lote, fabricacao, observacoes,
+                                      quantidade, unidade, peso_unitario)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (nome, preco_kg, validade, fornecedor, categoria, lote, fabricacao, observacoes,
+                  quantidade, unidade, peso_unitario))
             produto_id = cursor.lastrowid
             conn.commit()
             return produto_id

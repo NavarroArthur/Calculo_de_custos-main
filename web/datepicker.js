@@ -291,9 +291,12 @@ function initDatePicker(input) {
     // fechando o popup a cada clique. stopPropagation resolve isso.
     popup.addEventListener('click', (evento) => evento.stopPropagation());
 
-    // Fecha ao clicar FORA do wrapper. Checamos se o alvo do clique esta
-    // dentro do nosso wrapper; se nao estiver, fecha.
-    document.addEventListener('click', (evento) => {
+    // Fecha ao clicar FORA do wrapper. Usamos 'mousedown' (nao 'click') de
+    // proposito: assim olhamos ONDE o clique COMECOU. Se o usuario comecar uma
+    // selecao de texto DENTRO do wrapper e arrastar/soltar FORA, nao fecha —
+    // porque o mousedown iniciou dentro. (Com 'click', o alvo seria o ponto de
+    // soltura, fechando o popup no meio da selecao.)
+    document.addEventListener('mousedown', (evento) => {
         if (!wrapper.contains(evento.target)) fechar();
     });
 

@@ -73,8 +73,9 @@ function initMenuHud() {
     const btnSair = document.getElementById('btnLogout');
     if (btnSair) btnSair.addEventListener('click', fechar);
 
-    // Fecha ao clicar FORA do HUD.
-    document.addEventListener('click', function (evento) {
+    // Fecha ao clicar FORA do HUD. Usamos 'mousedown' (onde o clique COMECA),
+    // nao 'click', pra nao fechar quando o usuario seleciona texto e solta fora.
+    document.addEventListener('mousedown', function (evento) {
         if (!evento.target.closest('.nav-hud')) fechar();
     });
     // Fecha com a tecla Esc.

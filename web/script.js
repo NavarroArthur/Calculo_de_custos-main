@@ -112,7 +112,9 @@ function inicializarEventos() {
     if (btnExcluirPerfil) btnExcluirPerfil.addEventListener('click', excluirPerfilProduto);
     const overlayModal = document.getElementById('produtoModal');
     if (overlayModal) {
-        overlayModal.addEventListener('click', function(e) {
+        // 'mousedown' (nao 'click'): so fecha se o clique COMECOU no fundo do
+        // modal. Assim, selecionar texto num campo e soltar no fundo nao fecha.
+        overlayModal.addEventListener('mousedown', function(e) {
             if (e.target === overlayModal) fecharModalProduto();   // clique fora fecha
         });
         document.addEventListener('keydown', function(e) {

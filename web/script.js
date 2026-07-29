@@ -127,6 +127,14 @@ function inicializarEventos() {
     // Login, logout e backup
     const loginForm = document.getElementById('loginForm');
     if (loginForm) loginForm.addEventListener('submit', fazerLogin);
+    // Botao de mostrar/ocultar a senha
+    const toggleSenha = document.getElementById('toggleSenha');
+    if (toggleSenha) toggleSenha.addEventListener('click', alternarSenha);
+    // Ao digitar de novo, some com a mensagem de erro anterior
+    ['login_email', 'login_senha'].forEach(function (id) {
+        const campo = document.getElementById(id);
+        if (campo) campo.addEventListener('input', limparErroLogin);
+    });
     const btnLogout = document.getElementById('btnLogout');
     if (btnLogout) btnLogout.addEventListener('click', logout);
     const btnBaixarBackup = document.getElementById('btnBaixarBackup');
@@ -276,7 +284,7 @@ function exibirResultados(dados, resultados) {
                     <i class="fas fa-percentage"></i>
                 </div>
                 <div class="result-card-value">${porcentagem.toFixed(1)}%</div>
-                <div class="result-card-label">Beneficiamento</div>
+                <div class="result-card-label" title="Quanto o peso aumentou do inicio ao fim do processo (em %).">Beneficiamento</div>
             </div>
             
             <div class="result-card">
@@ -342,11 +350,11 @@ function exibirResultados(dados, resultados) {
                     <span class="detail-item-value">R$ ${dados.preco.toFixed(2)}</span>
                 </div>
                 <div class="detail-item">
-                    <span class="detail-item-label">Custo pós-beneficiamento por Kg</span>
+                    <span class="detail-item-label" title="Quanto custa cada quilo depois do beneficiamento.">Custo pós-beneficiamento por Kg</span>
                     <span class="detail-item-value">R$ ${custo_pos_beneficiamento.toFixed(2)}</span>
                 </div>
                 <div class="detail-item">
-                    <span class="detail-item-label">Diferença de valor por Kg</span>
+                    <span class="detail-item-label" title="Diferenca entre o preco inicial por Kg e o custo por Kg apos o processo.">Diferença de valor por Kg</span>
                     <span class="detail-item-value ${diferenca_valor >= 0 ? 'text-success' : 'text-error'}">R$ ${diferenca_valor.toFixed(2)}</span>
                 </div>
             </div>
@@ -425,8 +433,22 @@ function mostrarToast(mensagem, tipo = 'success') {
 }
 
 // Inicialização do sistema
+// Esconde os elementos marcados com [data-admin] para quem NÃO é admin.
+// IMPORTANTE: isto é só UX (esconder botões). A segurança de verdade está no
+// servidor (@exige_admin) — o front nunca é a fonte da verdade de permissão,
+// porque o usuário pode alterar o HTML/JS no próprio navegador.
+function aplicarPermissoesUI() {
+    const ehAdmin = localStorage.getItem('papel') === 'admin';
+    document.querySelectorAll('[data-admin]').forEach(el => {
+        el.style.display = ehAdmin ? '' : 'none';
+    });
+}
+
 async function inicializarSistema() {
     try {
+        // Ajusta a interface conforme o papel do usuário (admin x leitura)
+        aplicarPermissoesUI();
+
         // Verificar se a API está funcionando
         await verificarAPI();
         
@@ -508,6 +530,8 @@ function preencherConfigForm() {
 // Salva os novos precos no banco (PUT /api/configuracoes) e atualiza o fallback local
 async function handleConfigSubmit(event) {
     event.preventDefault();
+    // Acao sensivel: estes precos afetam TODOS os calculos. Pede confirmacao.
+    if (!confirm('Isto vai alterar o custo de TODOS os cálculos daqui pra frente. Deseja salvar os novos preços?')) return;
     const novos = {
         preco_gelo: parseFloat(document.getElementById('cfg_gelo').value),
         preco_papelao: parseFloat(document.getElementById('cfg_papelao').value),
@@ -544,8 +568,44 @@ function esconderLogin() {
     if (o) o.classList.add('hidden');
 }
 
+// Mostra/oculta a senha alternando o type do input entre "password" e "text".
+function alternarSenha() {
+    const input = document.getElementById('login_senha');
+    const btn = document.getElementById('toggleSenha');
+    if (!input || !btn) return;
+    const icone = btn.querySelector('i');
+    const vaiMostrar = input.type === 'password';   // se está escondida, vamos mostrar
+    input.type = vaiMostrar ? 'text' : 'password';
+    // Troca o ícone: olho aberto (escondida) x olho cortado (mostrando)
+    if (icone) {
+        icone.classList.toggle('fa-eye', !vaiMostrar);
+        icone.classList.toggle('fa-eye-slash', vaiMostrar);
+    }
+    // Acessibilidade: informa o estado para leitores de tela
+    btn.setAttribute('aria-pressed', String(vaiMostrar));
+    const rotulo = vaiMostrar ? 'Ocultar senha' : 'Mostrar senha';
+    btn.setAttribute('aria-label', rotulo);
+    btn.setAttribute('title', rotulo);
+    input.focus();
+}
+
+// Exibe uma mensagem de erro dentro da caixa de login.
+function mostrarErroLogin(msg) {
+    const el = document.getElementById('loginErro');
+    if (!el) return;
+    el.textContent = msg;
+    el.hidden = false;
+}
+
+// Esconde a mensagem de erro do login.
+function limparErroLogin() {
+    const el = document.getElementById('loginErro');
+    if (el) { el.textContent = ''; el.hidden = true; }
+}
+
 async function fazerLogin(event) {
     event.preventDefault();
+    limparErroLogin();   // limpa erro de tentativa anterior
     const email = document.getElementById('login_email').value.trim();
     const senha = document.getElementById('login_senha').value;
     try {
@@ -554,20 +614,27 @@ async function fazerLogin(event) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email, senha })
         });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || 'Falha no login');
+        // Se a resposta não for JSON válido, usa objeto vazio para não quebrar
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.error || 'E-mail ou senha inválidos');
         localStorage.setItem('token', data.token);
+        localStorage.setItem('papel', data.papel || 'leitura');  // guarda o papel p/ a UI
         document.getElementById('login_senha').value = '';
         esconderLogin();
         mostrarToast(`Bem-vindo, ${data.nome}!`, 'success');
         inicializarSistema();
     } catch (error) {
-        mostrarToast(error.message, 'error');
+        // "Failed to fetch" = servidor fora do ar / sem internet
+        const msg = (error.message === 'Failed to fetch')
+            ? 'Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.'
+            : error.message;
+        mostrarErroLogin(msg);   // mensagem visível dentro da caixa de login
     }
 }
 
 function logout() {
     localStorage.removeItem('token');
+    localStorage.removeItem('papel');
     mostrarLogin();
     mostrarToast('Você saiu.', 'success');
 }

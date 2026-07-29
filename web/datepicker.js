@@ -272,6 +272,10 @@ function initDatePicker(input) {
         desenhar();
         popup.hidden = false;
         wrapper.classList.add('dp-aberto');
+        // Dentro de containers com rolagem (ex.: o modal de produto no celular),
+        // garante que o calendario apareca inteiro. 'nearest' rola o minimo
+        // necessario e nao mexe se ja estiver visivel.
+        try { popup.scrollIntoView({ block: 'nearest' }); } catch (e) { /* ignora */ }
     }
 
     function fechar() {

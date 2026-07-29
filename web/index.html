@@ -3,8 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!--
+      Content-Security-Policy (item 8 da checklist): diz ao navegador de ONDE ele
+      pode carregar cada tipo de recurso. Se um atacante injetar um <script> de um
+      domínio fora desta lista, o navegador se recusa a executá-lo (defesa contra XSS).
+      Nota: 'unsafe-inline' ainda é necessário porque a página usa alguns handlers
+      inline (onclick=...) e um <style> inline. O próximo passo para uma CSP mais
+      forte seria mover esses handlers para os arquivos .js e remover 'unsafe-inline'.
+    -->
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com;
+        style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com;
+        font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com;
+        img-src 'self' data:;
+        connect-src 'self' http://localhost:5000 https://arthur.pythonanywhere.com;
+        object-src 'none';
+        base-uri 'self';
+        frame-ancestors 'none'">
     <title>Calculadora de Custos - Beneficiamento de Pescados</title>
-    <link rel="stylesheet" href="style.css?v=13">
+    <link rel="stylesheet" href="style.css?v=15">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- jsPDF: unica dependencia de PDF (o html2pdf foi removido, nao era mais usado) -->
@@ -43,11 +61,11 @@
                             Histórico
                             <span class="history-count" id="historyCount" aria-label="cálculos no histórico">0</span>
                         </button>
-                        <button class="nav-btn" data-tab="produtos" role="menuitem">
+                        <button class="nav-btn" data-tab="produtos" data-admin role="menuitem">
                             <i class="fas fa-fish" aria-hidden="true"></i>
                             Produtos
                         </button>
-                        <button class="nav-btn" data-tab="config" role="menuitem">
+                        <button class="nav-btn" data-tab="config" data-admin role="menuitem">
                             <i class="fas fa-gear" aria-hidden="true"></i>
                             Configurações
                         </button>
@@ -198,7 +216,10 @@
             <div class="tab-content" id="history-tab">
                 <div class="history-container">
                     <div class="history-header">
-                        <h2><i class="fas fa-history" aria-hidden="true"></i> Histórico de Cálculos</h2>
+                        <div class="history-titulo">
+                            <h2><i class="fas fa-history" aria-hidden="true"></i> Histórico de Cálculos</h2>
+                            <p class="header-sub">Aqui ficam seus cálculos salvos. Toque em um para ver os detalhes ou refazer o cálculo.</p>
+                        </div>
                         <div class="history-actions">
                             <button class="action-btn secondary" onclick="limparHistorico()">
                                 <i class="fas fa-trash" aria-hidden="true"></i>
@@ -285,6 +306,10 @@
                     <div class="form-header">
                         <h2><i class="fas fa-gear" aria-hidden="true"></i> Configurações</h2>
                         <p>Altere os preços dos insumos usados nos cálculos. Eles ficam salvos no banco.</p>
+                    </div>
+                    <div class="aviso-config">
+                        <i class="fas fa-triangle-exclamation" aria-hidden="true"></i>
+                        <span>Atenção: alterar estes preços muda o custo de <strong>todos os cálculos</strong> daqui pra frente. Só altere se tiver certeza do novo valor.</span>
                     </div>
                     <form id="configForm" class="calc-form">
                         <div class="form-row">
@@ -384,8 +409,17 @@
                     </div>
                     <div class="form-group">
                         <label for="login_senha">Senha</label>
-                        <input type="password" id="login_senha" autocomplete="current-password" required>
+                        <div class="input-group tem-sufixo">
+                            <input type="password" id="login_senha" autocomplete="current-password" required>
+                            <!-- Botão de mostrar/ocultar a senha. type="button" para NÃO enviar o form. -->
+                            <button type="button" class="toggle-senha" id="toggleSenha"
+                                    aria-label="Mostrar senha" aria-pressed="false" title="Mostrar senha">
+                                <i class="fas fa-eye" aria-hidden="true"></i>
+                            </button>
+                        </div>
                     </div>
+                    <!-- Mensagem de erro do login. role="alert" faz o leitor de tela anunciar. -->
+                    <p id="loginErro" class="login-erro" role="alert" hidden></p>
                     <button type="submit" class="calculate-btn">
                         <i class="fas fa-right-to-bracket" aria-hidden="true"></i>
                         Entrar
@@ -502,15 +536,15 @@
         </div>
     </div>
 
-    <script src="datepicker.js?v=13"></script>
-    <script src="melhorias.js?v=13"></script>
-    <script src="menu-hud.js?v=13"></script>
+    <script src="datepicker.js?v=15"></script>
+    <script src="melhorias.js?v=15"></script>
+    <script src="menu-hud.js?v=15"></script>
     <!-- Logica extraida do script.js (carregada antes dele) -->
-    <script src="calculo.js?v=13"></script>
-    <script src="validacao.js?v=13"></script>
-    <script src="script.js?v=13"></script>
+    <script src="calculo.js?v=15"></script>
+    <script src="validacao.js?v=15"></script>
+    <script src="script.js?v=15"></script>
     <!-- Carregados DEPOIS do script.js para sobrescrever a exportacao de PDF -->
-    <script src="pdf-relatorio.js?v=13"></script>
-    <script src="historico-selecao.js?v=13"></script>
+    <script src="pdf-relatorio.js?v=15"></script>
+    <script src="historico-selecao.js?v=15"></script>
 </body>
 </html>

@@ -166,6 +166,22 @@ class DatabaseManager:
             self._migrar_colunas_produtos(cursor)
             # Migração: adiciona a coluna de senha na tabela usuarios (para login)
             self._migrar_usuarios_senha(cursor)
+            # Migração: adiciona a coluna de papel (admin/leitura) para controle de acesso
+            self._migrar_usuarios_papel(cursor)
+
+            # Tabela para o controle de tentativas de login (rate limiting).
+            # Fica no banco (e não na memória do processo) para ser COMPARTILHADA
+            # entre os vários workers do gunicorn. Se ficasse na memória, cada
+            # worker teria a sua própria contagem e o limite não valeria de verdade.
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS login_tentativas (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ip TEXT NOT NULL,
+                    criado_em REAL NOT NULL   -- horário da falha (time.time(), em segundos)
+                )
+            ''')
+            cursor.execute(
+                'CREATE INDEX IF NOT EXISTS idx_login_tentativas_ip ON login_tentativas(ip)')
 
             # Inserir configurações padrão
             self._insert_default_configurations(cursor)
@@ -286,18 +302,88 @@ class DatabaseManager:
         if 'senha_hash' not in existentes:
             cursor.execute('ALTER TABLE usuarios ADD COLUMN senha_hash TEXT')
 
+    def _migrar_usuarios_papel(self, cursor):
+        """Adiciona a coluna 'papel' na tabela usuarios (controle de acesso / RBAC).
+        Valor padrão 'leitura' = pode ver, mas não pode alterar/apagar dados.
+        O papel 'admin' é dado explicitamente ao administrador em api.py."""
+        cursor.execute('PRAGMA table_info(usuarios)')
+        existentes = {linha[1] for linha in cursor.fetchall()}
+        if 'papel' not in existentes:
+            # DEFAULT garante que qualquer usuário antigo já nasça como 'leitura'
+            cursor.execute(
+                "ALTER TABLE usuarios ADD COLUMN papel TEXT NOT NULL DEFAULT 'leitura'")
+
     # ----------------------------------------------------------------------
     # Autenticação e backup
     # ----------------------------------------------------------------------
     def obter_usuario_por_email(self, email: str):
-        """Retorna o usuário (id, nome, email, senha_hash) pelo e-mail, ou None."""
+        """Retorna o usuário (id, nome, email, senha_hash, papel) pelo e-mail, ou None."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         try:
-            cursor.execute('SELECT id, nome, email, senha_hash FROM usuarios WHERE email = ?', (email,))
+            cursor.execute(
+                'SELECT id, nome, email, senha_hash, papel FROM usuarios WHERE email = ?',
+                (email,))
             row = cursor.fetchone()
             return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def definir_papel_usuario(self, usuario_id: int, papel: str):
+        """Define o papel do usuário ('admin' ou 'leitura')."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                'UPDATE usuarios SET papel = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+                (papel, usuario_id))
+            conn.commit()
+        finally:
+            conn.close()
+
+    # ----------------------------------------------------------------------
+    # Rate limiting de login (compartilhado entre workers via banco)
+    # ----------------------------------------------------------------------
+    def contar_tentativas_login(self, ip: str, janela_seg: int) -> int:
+        """Conta quantas falhas de login esse IP teve dentro da janela de tempo.
+        Também aproveita para apagar registros velhos (fora da janela) — assim a
+        tabela não cresce para sempre."""
+        agora = datetime.now().timestamp()
+        limite = agora - janela_seg
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            # Limpeza: remove tentativas antigas de qualquer IP
+            cursor.execute('DELETE FROM login_tentativas WHERE criado_em < ?', (limite,))
+            cursor.execute(
+                'SELECT COUNT(*) FROM login_tentativas WHERE ip = ? AND criado_em >= ?',
+                (ip, limite))
+            total = cursor.fetchone()[0]
+            conn.commit()
+            return total
+        finally:
+            conn.close()
+
+    def registrar_tentativa_login(self, ip: str):
+        """Registra uma falha de login para o IP (com o horário atual)."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                'INSERT INTO login_tentativas (ip, criado_em) VALUES (?, ?)',
+                (ip, datetime.now().timestamp()))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def limpar_tentativas_login(self, ip: str):
+        """Zera as tentativas de um IP (chamado quando o login dá certo)."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute('DELETE FROM login_tentativas WHERE ip = ?', (ip,))
+            conn.commit()
         finally:
             conn.close()
 

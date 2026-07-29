@@ -805,13 +805,9 @@ select {
     }
     
     .logo h1 {
-        font-size: 2rem;
+        font-size: 1.4rem;
     }
-    
-    .logo i {
-        font-size: 2rem;
-    }
-    
+
     .main-content {
         padding: 2rem 1rem;
     }
@@ -851,13 +847,14 @@ select {
 
 @media (max-width: 480px) {
     .logo {
-        flex-direction: column;
-        gap: 0.5rem;
+        gap: 0.6rem;   /* mantem badge + texto lado a lado (nao empilha) */
     }
-    
+
     .logo h1 {
-        font-size: 1.75rem;
+        font-size: 1.25rem;
     }
+
+    .logo .subtitle { display: none; }   /* economiza espaco na barra */
     
     .form-header h2 {
         font-size: 1.5rem;
@@ -1479,6 +1476,40 @@ select:focus-visible {
 .input-group.tem-prefixo input { padding-left: 2.6rem; }
 .input-group.tem-sufixo  input { padding-right: 2.8rem; }
 
+/* Botao de mostrar/ocultar a senha (o "olho"). Diferente do sufixo de texto,
+   este e CLICAVEL, entao nao leva pointer-events: none. */
+.toggle-senha {
+    position: absolute;
+    right: 0.4rem;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0.45rem;
+    font-size: 1rem;
+    line-height: 1;
+    border-radius: 6px;
+}
+.toggle-senha:hover { color: var(--primary-color); }
+.toggle-senha:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 1px;
+}
+
+/* Mensagem de erro dentro da caixa de login. Fica escondida (atributo hidden)
+   ate o JS preencher com o motivo do erro. */
+.login-erro {
+    margin: 0.75rem 0 0;
+    padding: 0.6rem 0.8rem;
+    background: rgba(239, 68, 68, 0.1);   /* vermelho bem clarinho */
+    border-left: 3px solid var(--error-color);
+    border-radius: 6px;
+    color: var(--error-color);
+    font-size: 0.9rem;
+}
+
 /* --- 4) LABEL reage ao foco do campo (sem JS, so :focus-within) ---------- */
 .form-group:focus-within > label,
 .filter-field:focus-within > label {
@@ -1857,4 +1888,75 @@ select:focus-visible {
     gap: 0.75rem;
     justify-content: center;
     margin-top: 1.5rem;
+}
+
+
+/* ===========================================================================
+   NAVEGACAO RESPONSIVA + ORIENTACAO (UX para operadores leigos)
+   Telas grandes: as abas ficam SEMPRE visiveis (mais facil de descobrir).
+   Celular: continua o menu (HUD) que abre ao tocar.
+   =========================================================================== */
+@media (min-width: 860px) {
+    .hud-toggle { display: none; }                 /* some o botao "menu" no desktop */
+    .hud-menu,
+    .hud-menu[hidden] {                            /* abas SEMPRE visiveis, em linha */
+        display: flex;
+        position: static;
+        flex-direction: row;
+        align-items: center;
+        min-width: 0;
+        max-width: none;
+        gap: 0.2rem;
+        padding: 0.35rem;
+        background: var(--bg-primary);
+        border: 1px solid var(--border-light);
+        border-radius: var(--radius-lg);
+        box-shadow: none;
+        animation: none;
+    }
+    .hud-menu::before { display: none; }            /* remove a setinha do dropdown */
+    .hud-sep,
+    .hud-credits { display: none; }                 /* creditos so no menu do celular */
+    .hud-menu .nav-btn { width: auto; justify-content: center; padding: 0.55rem 1rem; }
+    .hud-menu .nav-btn .history-count { margin-left: 0.4rem; }
+}
+
+/* Subtitulo de orientacao dentro do header azul do historico. */
+.history-titulo { display: flex; flex-direction: column; gap: 0.25rem; }
+.header-sub {
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.85);
+    margin: 0;
+    font-weight: 400;
+}
+
+/* Aviso na tela de Configuracoes (acao que afeta todos os calculos). */
+.aviso-config {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.45);
+    color: var(--text-primary);
+    border-radius: var(--radius-md);
+    padding: 0.85rem 1rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.9rem;
+    line-height: 1.45;
+}
+.aviso-config i { color: var(--warning-color); font-size: 1.15rem; margin-top: 0.1rem; flex-shrink: 0; }
+
+
+/* ===========================================================================
+   TOQUE (mobile/tablet): alvos maiores e mais confortaveis para o dedo.
+   Recomendacao de acessibilidade: area de toque de ~44px.
+   =========================================================================== */
+@media (max-width: 768px) {
+    .history-action-btn { width: 2.75rem; height: 2.75rem; }   /* 44px */
+    .action-btn { min-height: 44px; }
+    .nav-btn { min-height: 44px; }
+    .preset-btn { min-height: 40px; }
+    .chip-x { width: 1.4rem; height: 1.4rem; }
+    /* No celular, o calendario ocupa um pouco mais de largura (dias maiores). */
+    .dp-popup { width: 19rem; }
 }

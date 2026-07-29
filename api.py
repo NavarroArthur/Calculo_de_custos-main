@@ -7,11 +7,11 @@ Beneficiamento de Pescados
 API Flask para gerenciar dados do banco SQLite
 """
 
-from flask import Flask, request, jsonify, send_file
+from functools import wraps
+from flask import Flask, request, jsonify, send_file, g
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
-from collections import defaultdict
 import json
 import os
 import time
@@ -20,6 +20,9 @@ from database import DatabaseManager
 from calculos import calcular_resultados
 
 app = Flask(__name__)
+
+# Estamos em produção? (definido pelo Procfile/Railway com FLASK_ENV=production)
+EM_PRODUCAO = os.environ.get('FLASK_ENV') == 'production'
 
 # CORS: em produção, defina FRONTEND_URL com o endereço do seu site (ex.: https://seuapp.vercel.app)
 # para aceitar chamadas só de lá. Sem essa variável (dev), libera qualquer origem.
@@ -35,11 +38,20 @@ db = DatabaseManager()
 # ---------------------------------------------------------------------------
 # Autenticação: login com senha em HASH + token assinado (sem sessão no servidor)
 # ---------------------------------------------------------------------------
-# A SECRET_KEY assina os tokens. EM PRODUÇÃO, defina a variável de ambiente SECRET_KEY.
+# A SECRET_KEY assina os tokens. Quem tiver essa chave consegue FORJAR tokens
+# válidos. Como o código é público no GitHub, uma chave "padrão" no código não
+# seria segredo nenhum. Por isso:
+#   - Em produção: a variável de ambiente SECRET_KEY é OBRIGATÓRIA. Se faltar, o
+#     app se recusa a subir (fail fast) em vez de rodar com uma chave conhecida.
+#   - Em desenvolvimento: usa uma chave fixa só para facilitar os testes locais.
 SECRET_KEY = os.environ.get('SECRET_KEY')
 if not SECRET_KEY:
+    if EM_PRODUCAO:
+        raise RuntimeError(
+            'SECRET_KEY não definida em produção. Defina a variável de ambiente '
+            'SECRET_KEY com um valor secreto e aleatório antes de subir o app.')
     SECRET_KEY = 'dev-inseguro-troque-em-producao'
-    print('⚠️  SECRET_KEY não definido — usando chave de desenvolvimento. Defina em produção!')
+    print('⚠️  SECRET_KEY não definida — usando chave de desenvolvimento (só em dev).')
 serializer = URLSafeTimedSerializer(SECRET_KEY)
 TOKEN_VALIDADE = 7 * 24 * 3600   # token vale 7 dias
 
@@ -47,9 +59,10 @@ TOKEN_VALIDADE = 7 * 24 * 3600   # token vale 7 dias
 CAMINHOS_ABERTOS = {'/api/health', '/api/login'}
 
 # ---------------------------------------------------------------------------
-# Proteção contra força bruta no login: limita tentativas por IP
+# Proteção contra força bruta no login: limita tentativas por IP.
+# A contagem fica no BANCO (database.py), não na memória, para ser compartilhada
+# entre os workers do gunicorn.
 # ---------------------------------------------------------------------------
-LOGIN_TENTATIVAS = defaultdict(list)   # ip -> lista de horários de falhas
 LOGIN_MAX = 5                          # máximo de falhas...
 LOGIN_JANELA = 300                     # ...dentro de 5 minutos (300s)
 
@@ -61,8 +74,9 @@ def _ip_cliente():
 
 
 def garantir_admin():
-    """Garante que existe um usuário administrador com senha.
-    A senha vem de ADMIN_SENHA (variável de ambiente). Sem ela, cria um padrão e avisa."""
+    """Garante que existe um usuário administrador (papel 'admin') com senha.
+    A senha vem de ADMIN_SENHA (variável de ambiente).
+    Em produção, NUNCA cria uma senha padrão: se ADMIN_SENHA faltar, só avisa."""
     email = os.environ.get('ADMIN_EMAIL', 'admin@calculadora.local')
     senha = os.environ.get('ADMIN_SENHA')
     usuario = db.obter_usuario_por_email(email)
@@ -70,12 +84,17 @@ def garantir_admin():
         # A variável de ambiente é a fonte da verdade da senha
         uid = usuario['id'] if usuario else db.criar_usuario(nome='Administrador', email=email)
         db.definir_senha_usuario(uid, generate_password_hash(senha))
+        db.definir_papel_usuario(uid, 'admin')   # garante o papel de administrador
+    elif EM_PRODUCAO:
+        # Em produção, criar senha padrão seria um buraco de segurança (senha
+        # conhecida). Melhor não criar nada e avisar para definir ADMIN_SENHA.
+        print('⚠️  ADMIN_SENHA não definida em produção. Defina-a para habilitar o login do admin.')
     elif not (usuario and usuario.get('senha_hash')):
-        # Primeira vez, sem ADMIN_SENHA: cria com senha padrão e avisa
+        # Só em DESENVOLVIMENTO: cria com senha padrão para facilitar os testes locais
         uid = usuario['id'] if usuario else db.criar_usuario(nome='Administrador', email=email)
         db.definir_senha_usuario(uid, generate_password_hash('admin123'))
-        print(f'⚠️  Admin criado: e-mail "{email}", senha padrão "admin123". '
-              'Defina ADMIN_SENHA e troque assim que possível!')
+        db.definir_papel_usuario(uid, 'admin')
+        print(f'⚠️  (dev) Admin criado: e-mail "{email}", senha padrão "admin123".')
 
 
 garantir_admin()
@@ -83,7 +102,9 @@ garantir_admin()
 
 @app.before_request
 def proteger_api():
-    """Exige token válido em todas as rotas /api/, exceto as abertas (health e login)."""
+    """AUTENTICAÇÃO: exige token válido em todas as rotas /api/, exceto as abertas.
+    Além de validar, guarda quem é o usuário (uid e papel) em `g`, para as rotas
+    poderem checar as permissões depois (AUTORIZAÇÃO)."""
     if request.method == 'OPTIONS':
         return  # deixa o preflight do CORS passar
     caminho = request.path
@@ -93,9 +114,40 @@ def proteger_api():
         if not token:
             return jsonify({'error': 'Não autorizado'}), 401
         try:
-            serializer.loads(token, max_age=TOKEN_VALIDADE)
+            # O token guarda {'uid': ..., 'papel': ...}. Recuperamos e validamos a assinatura.
+            dados = serializer.loads(token, max_age=TOKEN_VALIDADE)
         except (BadSignature, SignatureExpired):
             return jsonify({'error': 'Sessão expirada. Faça login novamente.'}), 401
+        # Deixa o usuário disponível para o resto da requisição (via flask.g)
+        g.usuario_id = dados.get('uid')
+        g.papel = dados.get('papel', 'leitura')
+
+
+def exige_admin(f):
+    """AUTORIZAÇÃO: decorator que só deixa passar quem tem papel 'admin'.
+    Autenticado (before_request) != autorizado. Um usuário 'leitura' pode ver,
+    mas não pode alterar/apagar dados nem baixar o banco inteiro."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if getattr(g, 'papel', 'leitura') != 'admin':
+            return jsonify({'error': 'Acesso negado: requer permissão de administrador'}), 403
+        return f(*args, **kwargs)
+    return wrapper
+
+
+@app.after_request
+def cabecalhos_seguranca(resposta):
+    """Adiciona cabeçalhos de segurança em TODA resposta da API (defesa em camadas).
+    Estes protegem o lado do cliente (item 8 da checklist da Cloudflare)."""
+    # Impede o navegador de "adivinhar" o tipo do conteúdo (evita truques com MIME)
+    resposta.headers['X-Content-Type-Options'] = 'nosniff'
+    # Impede que a API seja embutida em <iframe> de outro site (anti clickjacking)
+    resposta.headers['X-Frame-Options'] = 'DENY'
+    # Não vaza a URL da API no cabeçalho Referer ao navegar para fora
+    resposta.headers['Referrer-Policy'] = 'no-referrer'
+    # A API só devolve JSON, então proíbe qualquer recurso ativo por padrão
+    resposta.headers['Content-Security-Policy'] = "default-src 'none'"
+    return resposta
 
 
 @app.route('/api/login', methods=['POST'])
@@ -103,10 +155,8 @@ def login():
     """Autentica por e-mail + senha e devolve um token assinado."""
     try:
         ip = _ip_cliente()
-        agora = time.time()
-        # Descarta tentativas antigas (fora da janela) e checa o limite
-        LOGIN_TENTATIVAS[ip] = [t for t in LOGIN_TENTATIVAS[ip] if agora - t < LOGIN_JANELA]
-        if len(LOGIN_TENTATIVAS[ip]) >= LOGIN_MAX:
+        # Checa o limite consultando o banco (compartilhado entre os workers)
+        if db.contar_tentativas_login(ip, LOGIN_JANELA) >= LOGIN_MAX:
             return jsonify({'error': 'Muitas tentativas. Tente novamente em alguns minutos.'}), 429
 
         data = request.get_json() or {}
@@ -115,12 +165,14 @@ def login():
         usuario = db.obter_usuario_por_email(email)
         if not usuario or not usuario.get('senha_hash') \
                 or not check_password_hash(usuario['senha_hash'], senha):
-            LOGIN_TENTATIVAS[ip].append(agora)   # registra a falha
+            db.registrar_tentativa_login(ip)     # registra a falha no banco
             return jsonify({'error': 'E-mail ou senha inválidos'}), 401
 
-        LOGIN_TENTATIVAS.pop(ip, None)           # login ok: zera o contador do IP
-        token = serializer.dumps({'uid': usuario['id']})
-        return jsonify({'success': True, 'token': token, 'nome': usuario['nome']})
+        db.limpar_tentativas_login(ip)           # login ok: zera o contador do IP
+        # O papel entra no token para o servidor saber o que o usuário pode fazer
+        token = serializer.dumps({'uid': usuario['id'], 'papel': usuario.get('papel', 'leitura')})
+        return jsonify({'success': True, 'token': token,
+                        'nome': usuario['nome'], 'papel': usuario.get('papel', 'leitura')})
     except Exception as e:
         app.logger.error(f'Erro no login: {e}')
         return jsonify({'error': 'Erro no login'}), 500
@@ -136,6 +188,7 @@ def health_check():
     })
 
 @app.route('/api/usuarios', methods=['POST'])
+@exige_admin
 def criar_usuario():
     """Criar novo usuário"""
     try:
@@ -296,6 +349,7 @@ def obter_configuracoes():
         return jsonify({'error': 'Erro ao obter configurações'}), 500
 
 @app.route('/api/configuracoes', methods=['PUT'])
+@exige_admin
 def atualizar_configuracoes():
     """Atualizar os preços dos insumos (só as chaves conhecidas, validadas)."""
     CHAVES_PRECO = {'preco_gelo', 'preco_papelao', 'preco_fita'}
@@ -354,6 +408,7 @@ def historico_produto(produto_id):
         return jsonify({'error': 'Erro ao obter histórico do produto'}), 500
 
 @app.route('/api/produtos', methods=['POST'])
+@exige_admin
 def criar_produto():
     """Cria um novo produto com o perfil completo."""
     try:
@@ -385,6 +440,7 @@ def criar_produto():
         return jsonify({'error': 'Erro ao criar produto'}), 500
 
 @app.route('/api/produtos/<int:produto_id>', methods=['PUT'])
+@exige_admin
 def atualizar_produto(produto_id):
     """Atualiza os campos informados de um produto (perfil e/ou preço)."""
     try:
@@ -409,6 +465,7 @@ def atualizar_produto(produto_id):
         return jsonify({'error': 'Erro ao atualizar produto'}), 500
 
 @app.route('/api/produtos/<int:produto_id>', methods=['DELETE'])
+@exige_admin
 def remover_produto(produto_id):
     """Remove um produto e seu histórico."""
     try:
@@ -419,6 +476,7 @@ def remover_produto(produto_id):
         return jsonify({'error': 'Erro ao remover produto'}), 500
 
 @app.route('/api/backup', methods=['POST'])
+@exige_admin
 def fazer_backup():
     """Cria uma cópia do banco no servidor (pasta backups/)."""
     try:
@@ -429,6 +487,7 @@ def fazer_backup():
         return jsonify({'error': 'Erro ao criar backup'}), 500
 
 @app.route('/api/backup/download', methods=['GET'])
+@exige_admin
 def baixar_backup():
     """Envia o arquivo do banco para download (o backup que você guarda no seu PC)."""
     try:
@@ -439,8 +498,10 @@ def baixar_backup():
         return jsonify({'error': 'Erro ao baixar backup'}), 500
 
 @app.route('/api/exportar', methods=['GET'])
+@exige_admin
 def exportar_dados():
-    """Exportar dados do sistema"""
+    """Exportar dados do sistema (inclui a tabela de usuários com e-mail/telefone:
+    dado pessoal, por isso restrito a admin)."""
     try:
         formato = request.args.get('formato', 'json')
         

@@ -5,6 +5,8 @@ __pycache__/
 
 # Banco de dados e backups (sao dados, nao codigo)
 *.db
+*.db-wal
+*.db-shm
 backup_*.json
 
 # Ambiente virtual e segredos

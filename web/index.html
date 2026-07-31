@@ -22,7 +22,7 @@
         base-uri 'self';
         frame-ancestors 'none'">
     <title>Calculadora de Custos - Beneficiamento de Pescados</title>
-    <link rel="stylesheet" href="style.css?v=15">
+    <link rel="stylesheet" href="style.css?v=17">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- jsPDF: unica dependencia de PDF (o html2pdf foi removido, nao era mais usado) -->
@@ -68,6 +68,10 @@
                         <button class="nav-btn" data-tab="config" data-admin role="menuitem">
                             <i class="fas fa-gear" aria-hidden="true"></i>
                             Configurações
+                        </button>
+                        <button class="nav-btn" data-tab="logs" data-admin role="menuitem">
+                            <i class="fas fa-clipboard-list" aria-hidden="true"></i>
+                            Logs
                         </button>
                         <div class="hud-sep"></div>
                         <button class="nav-btn" id="btnLogout" type="button" role="menuitem">
@@ -383,6 +387,33 @@
                     </form>
                 </div>
             </div>
+
+            <!-- Aba de Logs: ocorrencias do sistema (so admin ve esta aba) -->
+            <div class="tab-content" id="logs-tab">
+                <div class="form-container">
+                    <div class="form-header">
+                        <h2><i class="fas fa-clipboard-list" aria-hidden="true"></i> Logs do sistema</h2>
+                        <p>Ocorrencias registradas: logins, tentativas falhas, acessos negados e erros.</p>
+                    </div>
+                    <div class="produtos-toolbar">
+                        <select id="logsFiltro" aria-label="Filtrar por tipo de ocorrencia">
+                            <option value="">Todos os tipos</option>
+                            <option value="login">Login (sucesso)</option>
+                            <option value="login_falha">Login (falha)</option>
+                            <option value="login_bloqueado">Login bloqueado</option>
+                            <option value="acesso_negado">Acesso negado</option>
+                            <option value="erro">Erro</option>
+                            <option value="calculo_salvo">Calculo salvo</option>
+                            <option value="usuario_criado">Usuario criado</option>
+                        </select>
+                        <button type="button" class="action-btn secondary" id="btnAtualizarLogs">
+                            <i class="fas fa-rotate" aria-hidden="true"></i>
+                            Atualizar
+                        </button>
+                    </div>
+                    <div id="listaLogs" class="logs-lista" aria-live="polite"></div>
+                </div>
+            </div>
         </main>
 
     </div>
@@ -542,7 +573,7 @@
     <!-- Logica extraida do script.js (carregada antes dele) -->
     <script src="calculo.js?v=15"></script>
     <script src="validacao.js?v=15"></script>
-    <script src="script.js?v=15"></script>
+    <script src="script.js?v=17"></script>
     <!-- Carregados DEPOIS do script.js para sobrescrever a exportacao de PDF -->
     <script src="pdf-relatorio.js?v=15"></script>
     <script src="historico-selecao.js?v=15"></script>

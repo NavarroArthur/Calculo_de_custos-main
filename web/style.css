@@ -1510,6 +1510,35 @@ select:focus-visible {
     font-size: 0.9rem;
 }
 
+/* --- Aba de Logs -------------------------------------------------------- */
+.logs-lista { display: flex; flex-direction: column; gap: 8px; margin-top: 1rem; }
+.logs-vazio { color: var(--text-secondary); text-align: center; padding: 1.5rem; }
+.log-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 0.7rem 0.9rem;
+    background: var(--surface-color, #fff);
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 8px;
+}
+.log-badge {
+    flex-shrink: 0;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+/* Cores por gravidade: verde (ok), amarelo (aviso), vermelho (erro), cinza (neutro) */
+.log-badge.ok     { background: rgba(16, 185, 129, 0.12); color: #059669; }
+.log-badge.aviso  { background: rgba(245, 158, 11, 0.14); color: #b45309; }
+.log-badge.erro   { background: rgba(239, 68, 68, 0.12);  color: var(--error-color); }
+.log-badge.neutro { background: rgba(107, 114, 128, 0.14); color: #4b5563; }
+.log-corpo { min-width: 0; }
+.log-detalhes { font-size: 0.9rem; color: var(--text-primary, #111827); word-break: break-word; }
+.log-meta { font-size: 0.78rem; color: var(--text-secondary, #6b7280); margin-top: 2px; }
+
 /* --- 4) LABEL reage ao foco do campo (sem JS, so :focus-within) ---------- */
 .form-group:focus-within > label,
 .filter-field:focus-within > label {

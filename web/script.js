@@ -11,7 +11,6 @@ const API_BASE_URL = rodandoLocal ? 'http://localhost:5000/api' : PRODUCTION_API
 // carregarConfiguracoes() sobrescreve estes valores com os precos do banco,
 // que sao a fonte oficial dos precos.
 let PRECOS = { GELO: 8.5, PAPELAO: 7.3, FITA: 0.34 };
-let USUARIO_ID = null;
 // Lista de produtos vinda do banco (id, nome, preco_kg)
 let PRODUTOS = [];
 
@@ -135,6 +134,11 @@ function inicializarEventos() {
         const campo = document.getElementById(id);
         if (campo) campo.addEventListener('input', limparErroLogin);
     });
+    // Aba de Logs: botao atualizar e filtro por tipo
+    const btnLogs = document.getElementById('btnAtualizarLogs');
+    if (btnLogs) btnLogs.addEventListener('click', carregarLogs);
+    const filtroLogs = document.getElementById('logsFiltro');
+    if (filtroLogs) filtroLogs.addEventListener('change', carregarLogs);
     const btnLogout = document.getElementById('btnLogout');
     if (btnLogout) btnLogout.addEventListener('click', logout);
     const btnBaixarBackup = document.getElementById('btnBaixarBackup');
@@ -457,11 +461,8 @@ async function inicializarSistema() {
 
         // Carregar produtos e seus precos
         await carregarProdutos();
-        
-        // Criar ou obter usuário padrão
-        await inicializarUsuario();
-        
-        // Carregar histórico do banco de dados
+
+        // Carregar histórico do banco de dados (do usuário logado)
         await carregarHistoricoAPI();
         
         mostrarToast('Sistema inicializado com sucesso!', 'success');
@@ -969,47 +970,6 @@ async function excluirPerfilProduto() {
     }
 }
 
-// Inicializar usuário
-async function inicializarUsuario() {
-    try {
-        // Verificar se já existe um usuário salvo
-        const usuarioSalvo = localStorage.getItem('usuario_id');
-        if (usuarioSalvo) {
-            USUARIO_ID = parseInt(usuarioSalvo);
-            return;
-        }
-        
-        // Criar usuário padrão
-        const response = await fetch(`${API_BASE_URL}/usuarios`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                nome: 'Usuário Web',
-                email: `usuario_${Date.now()}@web.local`,
-                empresa: 'Sistema Web',
-                telefone: '(11) 0000-0000'
-            })
-        });
-        
-        if (!response.ok) {
-            throw new Error('Erro ao criar usuário');
-        }
-        
-        const data = await response.json();
-        if (data.success) {
-            USUARIO_ID = data.usuario_id;
-            localStorage.setItem('usuario_id', USUARIO_ID);
-            console.log('✅ Usuário criado:', USUARIO_ID);
-        }
-    } catch (error) {
-        console.warn('⚠️ Erro ao inicializar usuário:', error);
-        // Usar ID padrão para modo offline
-        USUARIO_ID = 1;
-    }
-}
-
 // Salvar cálculo no banco de dados
 async function salvarNoBanco(dados) {
     try {
@@ -1019,7 +979,7 @@ async function salvarNoBanco(dados) {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                usuario_id: USUARIO_ID,
+                // usuario_id NÃO é enviado: o servidor usa a identidade do token
                 produto: dados.produto,
                 categoria: dados.categoria,
                 preco: dados.preco,
@@ -1051,7 +1011,7 @@ async function salvarNoBanco(dados) {
 // Carregar histórico da API
 async function carregarHistoricoAPI() {
     try {
-        const response = await fetch(`${API_BASE_URL}/calculos/usuario/${USUARIO_ID}?limite=100`);
+        const response = await fetch(`${API_BASE_URL}/calculos/meus?limite=100`);
         if (!response.ok) {
             throw new Error('Erro ao carregar histórico');
         }
@@ -1160,6 +1120,68 @@ function switchTab(tabId) {
     if (tabId === 'produtos') {
         renderListaProdutos();
     }
+    // Se for a aba de logs, buscar as ocorrencias no servidor
+    if (tabId === 'logs') {
+        carregarLogs();
+    }
+}
+
+// Rotulos amigaveis e cor (classe CSS) para cada tipo de ocorrencia
+const LOG_TIPOS = {
+    login:           { texto: 'Login',           cor: 'ok'    },
+    login_falha:     { texto: 'Login falhou',    cor: 'aviso' },
+    login_bloqueado: { texto: 'Login bloqueado', cor: 'erro'  },
+    acesso_negado:   { texto: 'Acesso negado',   cor: 'erro'  },
+    erro:            { texto: 'Erro',            cor: 'erro'  },
+    calculo_salvo:   { texto: 'Calculo salvo',   cor: 'ok'    },
+    usuario_criado:  { texto: 'Usuario criado',  cor: 'ok'    }
+};
+
+// Busca os logs no servidor (respeitando o filtro) e renderiza a lista.
+async function carregarLogs() {
+    const lista = document.getElementById('listaLogs');
+    if (!lista) return;
+    const filtro = document.getElementById('logsFiltro')?.value || '';
+    lista.innerHTML = '<p class="logs-vazio">Carregando...</p>';
+    try {
+        // encodeURIComponent: escapa o valor para montar a query string com seguranca
+        const url = `${API_BASE_URL}/logs?limite=200` + (filtro ? `&acao=${encodeURIComponent(filtro)}` : '');
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error('Falha ao carregar logs');
+        const data = await resp.json();
+        renderLogs(data.logs || []);
+    } catch (e) {
+        lista.innerHTML = '<p class="logs-vazio">Nao foi possivel carregar os logs.</p>';
+    }
+}
+
+// Escapa texto para evitar que um detalhe de log injete HTML (protecao contra XSS).
+function escaparHTML(txt) {
+    const div = document.createElement('div');
+    div.textContent = txt == null ? '' : String(txt);
+    return div.innerHTML;
+}
+
+function renderLogs(logs) {
+    const lista = document.getElementById('listaLogs');
+    if (!logs.length) {
+        lista.innerHTML = '<p class="logs-vazio">Nenhuma ocorrencia registrada.</p>';
+        return;
+    }
+    lista.innerHTML = logs.map(function (log) {
+        const tipo = LOG_TIPOS[log.acao] || { texto: log.acao, cor: 'neutro' };
+        // created_at vem do banco em UTC; toLocaleString formata para o fuso do navegador
+        const quando = log.created_at ? new Date(log.created_at + 'Z').toLocaleString('pt-BR') : '';
+        const quem = log.usuario_nome || (log.usuario_id ? `#${log.usuario_id}` : '-');
+        return `
+            <div class="log-item">
+                <span class="log-badge ${tipo.cor}">${escaparHTML(tipo.texto)}</span>
+                <div class="log-corpo">
+                    <div class="log-detalhes">${escaparHTML(log.detalhes || '')}</div>
+                    <div class="log-meta">${escaparHTML(quando)} &middot; ${escaparHTML(quem)}${log.ip_address ? ' &middot; ' + escaparHTML(log.ip_address) : ''}</div>
+                </div>
+            </div>`;
+    }).join('');
 }
 
 // Filtra os calculos conforme os campos de busca (produto, categoria, periodo)

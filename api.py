@@ -130,9 +130,38 @@ def exige_admin(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
         if getattr(g, 'papel', 'leitura') != 'admin':
+            # Registra a tentativa de acesso indevido (evento de segurança)
+            ip, ua = _req_ip_ua()
+            db.registrar_log(getattr(g, 'usuario_id', None), 'acesso_negado',
+                             f'{request.method} {request.path}', ip, ua)
             return jsonify({'error': 'Acesso negado: requer permissão de administrador'}), 403
         return f(*args, **kwargs)
     return wrapper
+
+
+def _req_ip_ua():
+    """Retorna (ip, user_agent) da requisição atual, para enriquecer os logs."""
+    return _ip_cliente(), request.headers.get('User-Agent', '')[:300]
+
+
+def log_erro(contexto, exc):
+    """Registra um erro nos DOIS lugares:
+      - log do servidor (app.logger): detalhe técnico, fica no PythonAnywhere;
+      - tabela de logs (registrar_log): resumido, aparece no painel do admin."""
+    app.logger.error(f'{contexto}: {exc}')
+    ip, ua = _req_ip_ua()
+    db.registrar_log(getattr(g, 'usuario_id', None), 'erro', f'{contexto}: {exc}', ip, ua)
+
+
+def _paginacao(limite_padrao=100, limite_max=500):
+    """Lê limite/offset da query string e aplica um TETO. Sem esse teto, um cliente
+    poderia pedir ?limite=99999999 e forçar o servidor a carregar tudo na memória
+    (uma pequena porta para negação de serviço)."""
+    limite = request.args.get('limite', limite_padrao, type=int) or limite_padrao
+    offset = request.args.get('offset', 0, type=int) or 0
+    limite = max(1, min(limite, limite_max))   # entre 1 e o teto
+    offset = max(0, offset)                     # nunca negativo
+    return limite, offset
 
 
 @app.after_request
@@ -154,9 +183,10 @@ def cabecalhos_seguranca(resposta):
 def login():
     """Autentica por e-mail + senha e devolve um token assinado."""
     try:
-        ip = _ip_cliente()
+        ip, ua = _req_ip_ua()
         # Checa o limite consultando o banco (compartilhado entre os workers)
         if db.contar_tentativas_login(ip, LOGIN_JANELA) >= LOGIN_MAX:
+            db.registrar_log(None, 'login_bloqueado', 'Limite de tentativas atingido', ip, ua)
             return jsonify({'error': 'Muitas tentativas. Tente novamente em alguns minutos.'}), 429
 
         data = request.get_json() or {}
@@ -165,17 +195,32 @@ def login():
         usuario = db.obter_usuario_por_email(email)
         if not usuario or not usuario.get('senha_hash') \
                 or not check_password_hash(usuario['senha_hash'], senha):
-            db.registrar_tentativa_login(ip)     # registra a falha no banco
+            db.registrar_tentativa_login(ip)     # registra a falha no banco (rate limit)
+            db.registrar_log(None, 'login_falha', f'Tentativa com e-mail: {email}', ip, ua)
             return jsonify({'error': 'E-mail ou senha inválidos'}), 401
 
         db.limpar_tentativas_login(ip)           # login ok: zera o contador do IP
+        db.registrar_log(usuario['id'], 'login', 'Login bem-sucedido', ip, ua)
         # O papel entra no token para o servidor saber o que o usuário pode fazer
         token = serializer.dumps({'uid': usuario['id'], 'papel': usuario.get('papel', 'leitura')})
         return jsonify({'success': True, 'token': token,
                         'nome': usuario['nome'], 'papel': usuario.get('papel', 'leitura')})
     except Exception as e:
-        app.logger.error(f'Erro no login: {e}')
+        log_erro('Erro no login', e)
         return jsonify({'error': 'Erro no login'}), 500
+
+
+@app.route('/api/logs', methods=['GET'])
+@exige_admin
+def listar_logs():
+    """Lista as ocorrências registradas (só admin). Aceita ?limite, ?offset e ?acao."""
+    try:
+        limite, offset = _paginacao(100)
+        acao = request.args.get('acao') or None
+        return jsonify({'success': True, 'logs': db.listar_logs(limite, offset, acao)})
+    except Exception as e:
+        log_erro('Erro ao listar logs', e)
+        return jsonify({'error': 'Erro ao listar logs'}), 500
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -192,8 +237,10 @@ def health_check():
 def criar_usuario():
     """Criar novo usuário"""
     try:
-        data = request.get_json()
-        
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({'error': 'Corpo da requisição deve ser um JSON válido'}), 400
+
         # Validações básicas
         if not data.get('nome'):
             return jsonify({'error': 'Nome é obrigatório'}), 400
@@ -214,17 +261,20 @@ def criar_usuario():
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
-        app.logger.error(f'Erro interno: {e}')
+        log_erro('Erro ao criar usuário', e)
         return jsonify({'error': 'Erro interno'}), 500
 
 @app.route('/api/calculos', methods=['POST'])
 def salvar_calculo():
     """Salvar novo cálculo"""
     try:
-        data = request.get_json()
-        
-        # Validações
-        campos_obrigatorios = ['usuario_id', 'produto', 'categoria', 'preco', 
+        # silent=True: se o corpo não for JSON válido, retorna None em vez de estourar
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({'error': 'Corpo da requisição deve ser um JSON válido'}), 400
+
+        # Validações (usuario_id NÃO entra aqui: o dono vem do token, não do cliente)
+        campos_obrigatorios = ['produto', 'categoria', 'preco',
                               'peso_inicial', 'peso_final', 'sacos_de_gelo', 'caixa_papelao']
         
         for campo in campos_obrigatorios:
@@ -255,9 +305,10 @@ def salvar_calculo():
             preco_venda=float(data['preco_venda']) if data.get('preco_venda') else None,
         )
 
-        # Salvar no banco
+        # Salvar no banco — o DONO do cálculo vem do TOKEN (g.usuario_id), nunca do
+        # corpo enviado pelo cliente. Assim ninguém salva cálculo no nome de outro.
         calculo_id = db.salvar_calculo(
-            usuario_id=int(data['usuario_id']),
+            usuario_id=g.usuario_id,
             dados_calculo=dados_calculo,
             resultados=resultados,
             observacoes=data.get('observacoes')
@@ -273,15 +324,33 @@ def salvar_calculo():
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
-        app.logger.error(f'Erro ao salvar cálculo: {e}')
+        log_erro('Erro ao salvar cálculo', e)
         return jsonify({'error': 'Erro ao salvar cálculo'}), 500
+
+@app.route('/api/calculos/meus', methods=['GET'])
+def obter_meus_calculos():
+    """Cálculos do usuário LOGADO. A identidade vem do token (g.usuario_id), não da
+    URL — por isso não dá para ver o histórico de outra pessoa por aqui."""
+    try:
+        limite, offset = _paginacao(100)
+        calculos = db.obter_calculos_usuario(g.usuario_id, limite, offset)
+        return jsonify({'success': True, 'calculos': calculos, 'total': len(calculos)})
+    except Exception as e:
+        log_erro('Erro ao obter meus cálculos', e)
+        return jsonify({'error': 'Erro ao obter cálculos'}), 500
 
 @app.route('/api/calculos/usuario/<int:usuario_id>', methods=['GET'])
 def obter_calculos_usuario(usuario_id):
-    """Obter cálculos de um usuário específico"""
+    """Obter cálculos de um usuário específico (por id).
+    AUTORIZAÇÃO: só o próprio dono ou um admin. Sem isso, qualquer um trocaria o
+    número na URL e leria o histórico dos outros (falha conhecida como IDOR)."""
     try:
-        limite = request.args.get('limite', 50, type=int)
-        offset = request.args.get('offset', 0, type=int)
+        if usuario_id != g.usuario_id and getattr(g, 'papel', 'leitura') != 'admin':
+            ip, ua = _req_ip_ua()
+            db.registrar_log(g.usuario_id, 'acesso_negado',
+                             f'GET /api/calculos/usuario/{usuario_id}', ip, ua)
+            return jsonify({'error': 'Acesso negado'}), 403
+        limite, offset = _paginacao(50)
         
         calculos = db.obter_calculos_usuario(usuario_id, limite, offset)
         
@@ -296,11 +365,11 @@ def obter_calculos_usuario(usuario_id):
         return jsonify({'error': 'Erro ao obter cálculos'}), 500
 
 @app.route('/api/calculos', methods=['GET'])
+@exige_admin
 def obter_todos_calculos():
-    """Obter todos os cálculos do sistema"""
+    """Obter todos os cálculos do sistema (de todos os usuários -> só admin)."""
     try:
-        limite = request.args.get('limite', 100, type=int)
-        offset = request.args.get('offset', 0, type=int)
+        limite, offset = _paginacao(100)
         
         calculos = db.obter_todos_calculos(limite, offset)
         
@@ -315,8 +384,9 @@ def obter_todos_calculos():
         return jsonify({'error': 'Erro ao obter cálculos'}), 500
 
 @app.route('/api/estatisticas', methods=['GET'])
+@exige_admin
 def obter_estatisticas():
-    """Obter estatísticas gerais do sistema"""
+    """Obter estatísticas gerais do sistema (agrega dados de todos -> só admin)."""
     try:
         stats = db.obter_estatisticas()
         
@@ -374,7 +444,7 @@ def atualizar_configuracoes():
         })
 
     except Exception as e:
-        app.logger.error(f'Erro ao atualizar configurações: {e}')
+        log_erro('Erro ao atualizar configurações', e)
         return jsonify({'error': 'Erro ao atualizar configurações'}), 500
 
 @app.route('/api/produtos', methods=['GET'])
@@ -436,7 +506,7 @@ def criar_produto():
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
-        app.logger.error(f'Erro ao criar produto: {e}')
+        log_erro('Erro ao criar produto', e)
         return jsonify({'error': 'Erro ao criar produto'}), 500
 
 @app.route('/api/produtos/<int:produto_id>', methods=['PUT'])
@@ -461,7 +531,7 @@ def atualizar_produto(produto_id):
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
-        app.logger.error(f'Erro ao atualizar produto: {e}')
+        log_erro('Erro ao atualizar produto', e)
         return jsonify({'error': 'Erro ao atualizar produto'}), 500
 
 @app.route('/api/produtos/<int:produto_id>', methods=['DELETE'])
@@ -472,7 +542,7 @@ def remover_produto(produto_id):
         db.remover_produto(produto_id)
         return jsonify({'success': True})
     except Exception as e:
-        app.logger.error(f'Erro ao remover produto: {e}')
+        log_erro('Erro ao remover produto', e)
         return jsonify({'error': 'Erro ao remover produto'}), 500
 
 @app.route('/api/backup', methods=['POST'])
@@ -491,6 +561,7 @@ def fazer_backup():
 def baixar_backup():
     """Envia o arquivo do banco para download (o backup que você guarda no seu PC)."""
     try:
+        db.forcar_checkpoint()   # garante que o .db baixado tenha as ultimas transacoes (modo WAL)
         nome = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
         return send_file(db.db_path, as_attachment=True, download_name=nome)
     except Exception as e:

@@ -31,10 +31,34 @@ class DatabaseManager:
         
         self.db_path = db_path
         self.init_database()
-    
+
+    def _conectar(self):
+        """Abre uma conexão JÁ configurada do jeito certo.
+        Todos os métodos usam esta função em vez de chamar sqlite3.connect direto,
+        para garantir num LUGAR SÓ (princípio DRY) quatro coisas importantes:
+
+          - timeout=30: se o banco estiver ocupado por outra escrita, espera até 30s
+            em vez de estourar na hora com "database is locked" (importante com os 2
+            workers do gunicorn).
+          - PRAGMA foreign_keys = ON: o SQLite IGNORA as FOREIGN KEY por padrão. Este
+            PRAGMA é POR CONEXÃO, então precisa ser ligado toda vez. Sem ele, dá pra
+            inserir um cálculo com usuario_id inexistente. Com ele, o banco garante a
+            integridade que o esquema promete.
+          - PRAGMA journal_mode = WAL: deixa leituras e escritas acontecerem ao mesmo
+            tempo (no modo padrão, uma escrita trava o banco inteiro). É persistente
+            no arquivo, mas rodar de novo é inofensivo.
+          - row_factory = Row: faz cada linha se comportar como um dicionário
+            (acesso por nome de coluna: row['nome']).
+        """
+        conn = sqlite3.connect(self.db_path, timeout=30)
+        conn.row_factory = sqlite3.Row
+        conn.execute('PRAGMA foreign_keys = ON')
+        conn.execute('PRAGMA journal_mode = WAL')
+        return conn
+
     def init_database(self):
         """Inicializa o banco de dados criando as tabelas necessárias"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         cursor = conn.cursor()
         
         try:
@@ -318,7 +342,7 @@ class DatabaseManager:
     # ----------------------------------------------------------------------
     def obter_usuario_por_email(self, email: str):
         """Retorna o usuário (id, nome, email, senha_hash, papel) pelo e-mail, ou None."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         try:
@@ -332,7 +356,7 @@ class DatabaseManager:
 
     def definir_papel_usuario(self, usuario_id: int, papel: str):
         """Define o papel do usuário ('admin' ou 'leitura')."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         cursor = conn.cursor()
         try:
             cursor.execute(
@@ -351,7 +375,7 @@ class DatabaseManager:
         tabela não cresce para sempre."""
         agora = datetime.now().timestamp()
         limite = agora - janela_seg
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         cursor = conn.cursor()
         try:
             # Limpeza: remove tentativas antigas de qualquer IP
@@ -367,7 +391,7 @@ class DatabaseManager:
 
     def registrar_tentativa_login(self, ip: str):
         """Registra uma falha de login para o IP (com o horário atual)."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         cursor = conn.cursor()
         try:
             cursor.execute(
@@ -379,7 +403,7 @@ class DatabaseManager:
 
     def limpar_tentativas_login(self, ip: str):
         """Zera as tentativas de um IP (chamado quando o login dá certo)."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         cursor = conn.cursor()
         try:
             cursor.execute('DELETE FROM login_tentativas WHERE ip = ?', (ip,))
@@ -389,7 +413,7 @@ class DatabaseManager:
 
     def definir_senha_usuario(self, usuario_id: int, senha_hash: str):
         """Grava o hash da senha de um usuário (nunca a senha em texto puro)."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         cursor = conn.cursor()
         try:
             cursor.execute(
@@ -399,9 +423,22 @@ class DatabaseManager:
         finally:
             conn.close()
 
+    def forcar_checkpoint(self):
+        """Descarrega o arquivo -wal para dentro do .db principal.
+        Com o modo WAL ligado, as escritas recentes ficam num arquivo separado
+        (banco.db-wal) até um 'checkpoint'. Antes de copiar/baixar o banco, é preciso
+        rodar isto, senão a cópia pode não conter as últimas transações."""
+        conn = self._conectar()
+        try:
+            conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+            conn.commit()
+        finally:
+            conn.close()
+
     def criar_backup(self, pasta: str = 'backups') -> str:
         """Copia o arquivo do banco para a pasta de backups, com data/hora no nome.
         Retorna o caminho do arquivo criado."""
+        self.forcar_checkpoint()   # garante que o backup tenha TODOS os dados
         os.makedirs(pasta, exist_ok=True)
         nome = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
         destino = os.path.join(pasta, nome)
@@ -411,7 +448,7 @@ class DatabaseManager:
 
     def listar_produtos(self):
         """Retorna todos os produtos (perfil completo), em ordem alfabética."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         try:
@@ -426,7 +463,7 @@ class DatabaseManager:
 
     def obter_produto(self, produto_id):
         """Retorna um único produto (perfil completo) ou None se não existir."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         try:
@@ -444,7 +481,7 @@ class DatabaseManager:
                       categoria=None, lote=None, fabricacao=None, observacoes=None,
                       quantidade=None, unidade=None, peso_unitario=None):
         """Cria um novo produto. Levanta ValueError se o nome já existir."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         cursor = conn.cursor()
         try:
             cursor.execute('''
@@ -470,7 +507,7 @@ class DatabaseManager:
         if not campos:
             return 0
 
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         cursor = conn.cursor()
         try:
             # Campos rastreados no histórico e o rótulo salvo no log (coluna -> nome)
@@ -517,7 +554,7 @@ class DatabaseManager:
 
     def remover_produto(self, produto_id):
         """Remove um produto e o seu histórico de preços."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         cursor = conn.cursor()
         try:
             cursor.execute('DELETE FROM historico_precos WHERE produto_id = ?', (produto_id,))
@@ -532,7 +569,7 @@ class DatabaseManager:
     def listar_historico_produto(self, produto_id):
         """Retorna o histórico unificado de alterações de um produto
         (campo, valor_anterior, valor_novo, created_at), do mais recente ao mais antigo."""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         try:
@@ -558,7 +595,7 @@ class DatabaseManager:
         Returns:
             ID do usuário criado
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         cursor = conn.cursor()
         
         try:
@@ -568,12 +605,14 @@ class DatabaseManager:
             ''', (nome, email, empresa, telefone))
             
             usuario_id = cursor.lastrowid
-            conn.commit()
-            
-            # Log da atividade
-            self._log_atividade(cursor, usuario_id, 'usuario_criado', 
+
+            # Log da atividade ANTES do commit: assim o usuário e o log são gravados
+            # juntos, na mesma transação. (Antes o commit vinha primeiro e o log era
+            # descartado no close() — por isso a tabela de logs ficava vazia.)
+            self._log_atividade(cursor, usuario_id, 'usuario_criado',
                               f'Usuário {nome} criado com sucesso')
-            
+            conn.commit()
+
             return usuario_id
             
         except sqlite3.IntegrityError as e:
@@ -599,7 +638,7 @@ class DatabaseManager:
         Returns:
             ID do cálculo salvo
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         cursor = conn.cursor()
         
         try:
@@ -635,12 +674,13 @@ class DatabaseManager:
             ))
             
             calculo_id = cursor.lastrowid
-            conn.commit()
-            
-            # Log da atividade
-            self._log_atividade(cursor, usuario_id, 'calculo_salvo', 
+
+            # Log da atividade ANTES do commit, para salvar cálculo e log juntos
+            # na mesma transação (ver explicação em criar_usuario).
+            self._log_atividade(cursor, usuario_id, 'calculo_salvo',
                               f'Cálculo {calculo_id} salvo para produto {dados_calculo["produto"]}')
-            
+            conn.commit()
+
             return calculo_id
             
         except Exception as e:
@@ -661,7 +701,7 @@ class DatabaseManager:
         Returns:
             Lista de cálculos
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
@@ -694,7 +734,7 @@ class DatabaseManager:
         Returns:
             Lista de todos os cálculos
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
@@ -724,7 +764,7 @@ class DatabaseManager:
         Returns:
             Dicionário com estatísticas
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         cursor = conn.cursor()
         
         try:
@@ -787,7 +827,7 @@ class DatabaseManager:
         Returns:
             Valor da configuração
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         cursor = conn.cursor()
         
         try:
@@ -807,7 +847,7 @@ class DatabaseManager:
             valor: Novo valor
             descricao: Descrição da configuração (opcional)
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         cursor = conn.cursor()
         
         try:
@@ -838,7 +878,58 @@ class DatabaseManager:
             ''', (usuario_id, acao, detalhes))
         except Exception as e:
             print(f"Erro ao registrar log: {e}")
-    
+
+    def registrar_log(self, usuario_id=None, acao: str = '', detalhes: str = None,
+                      ip: str = None, user_agent: str = None):
+        """Registra uma OCORRÊNCIA (login, acesso negado, erro, etc.) na tabela de logs.
+        Diferente de _log_atividade, este abre a PRÓPRIA conexão — use quando você
+        NÃO está dentro de outra transação (ex.: chamando da API, em api.py).
+        Envolve tudo em try/except: uma falha ao gravar o log JAMAIS pode derrubar
+        a operação principal do usuário."""
+        def _inserir(uid):
+            conn = self._conectar()
+            try:
+                conn.execute('''
+                    INSERT INTO logs_atividade (usuario_id, acao, detalhes, ip_address, user_agent)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (uid, acao, detalhes, ip, user_agent))
+                conn.commit()
+            finally:
+                conn.close()
+        try:
+            _inserir(usuario_id)
+        except Exception:
+            # Pode falhar se o usuario_id não existir mais (a FK bloqueia). Um log de
+            # segurança não pode ser PERDIDO por isso -> regrava sem vincular ao usuário.
+            try:
+                _inserir(None)
+            except Exception as e:
+                print(f"Erro ao registrar log: {e}")
+
+    def listar_logs(self, limite: int = 100, offset: int = 0, acao: str = None):
+        """Retorna as ocorrências mais recentes, já com o nome do usuário.
+        Usa LEFT JOIN porque usuario_id pode ser NULL (ex.: falha de login de um
+        e-mail que nem existe) — com INNER JOIN essas linhas sumiriam do relatório."""
+        conn = self._conectar()
+        try:
+            cursor = conn.cursor()
+            sql = '''
+                SELECT l.id, l.acao, l.detalhes, l.ip_address, l.created_at,
+                       l.usuario_id, u.nome AS usuario_nome
+                FROM logs_atividade l
+                LEFT JOIN usuarios u ON u.id = l.usuario_id
+            '''
+            params = []
+            if acao:
+                sql += ' WHERE l.acao = ?'
+                params.append(acao)
+            sql += ' ORDER BY l.id DESC LIMIT ? OFFSET ?'
+            params.extend([limite, offset])
+            cursor.execute(sql, params)
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
     def exportar_dados(self, formato: str = 'json') -> str:
         """
         Exporta todos os dados do sistema
@@ -860,7 +951,7 @@ class DatabaseManager:
     
     def _exportar_json(self, timestamp: str) -> str:
         """Exporta dados em formato JSON"""
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
@@ -900,7 +991,7 @@ class DatabaseManager:
         """Exporta dados em formato CSV"""
         import csv
         
-        conn = sqlite3.connect(self.db_path)
+        conn = self._conectar()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         

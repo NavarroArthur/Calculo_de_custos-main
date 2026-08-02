@@ -150,6 +150,9 @@ function inicializarEventos() {
     // Historico: carregar mais
     const btnMaisHist = document.getElementById('btnCarregarMais');
     if (btnMaisHist) btnMaisHist.addEventListener('click', carregarMaisHistorico);
+    // Usuarios: criar novo
+    const formUsuario = document.getElementById('formNovoUsuario');
+    if (formUsuario) formUsuario.addEventListener('submit', criarUsuarioAdmin);
     const btnLogout = document.getElementById('btnLogout');
     if (btnLogout) btnLogout.addEventListener('click', logout);
     const btnBaixarBackup = document.getElementById('btnBaixarBackup');
@@ -1137,6 +1140,75 @@ function switchTab(tabId) {
     // Se for a aba de logs, buscar as ocorrencias no servidor
     if (tabId === 'logs') {
         carregarLogs();
+    }
+    // Se for a aba de usuarios, buscar a lista
+    if (tabId === 'usuarios') {
+        carregarUsuarios();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Aba de Usuários (só admin)
+// ---------------------------------------------------------------------------
+async function carregarUsuarios() {
+    const lista = document.getElementById('listaUsuarios');
+    if (!lista) return;
+    lista.innerHTML = '<p class="logs-vazio">Carregando...</p>';
+    try {
+        const resp = await fetch(`${API_BASE_URL}/usuarios`);
+        if (!resp.ok) throw new Error('Falha');
+        const data = await resp.json();
+        renderUsuarios(data.usuarios || []);
+    } catch (e) {
+        lista.innerHTML = '<p class="logs-vazio">Não foi possível carregar os usuários.</p>';
+    }
+}
+
+function renderUsuarios(usuarios) {
+    const lista = document.getElementById('listaUsuarios');
+    if (!usuarios.length) {
+        lista.innerHTML = '<p class="logs-vazio">Nenhum usuário cadastrado.</p>';
+        return;
+    }
+    lista.innerHTML = usuarios.map(function (u) {
+        const papelTxt = u.papel === 'admin' ? 'Admin' : 'Leitura';
+        const papelCor = u.papel === 'admin' ? 'erro' : 'neutro';
+        // tem_senha vem 1/0 do SQLite; sem senha o usuário não consegue logar
+        const acesso = u.tem_senha
+            ? ''
+            : ' <span class="log-badge aviso">sem senha (não loga)</span>';
+        return `
+            <div class="usuario-item">
+                <div class="usuario-info">
+                    <span class="usuario-nome">${escaparHTML(u.nome || '-')}</span>
+                    <span class="usuario-email">${escaparHTML(u.email || 'sem e-mail')}</span>
+                </div>
+                <div class="usuario-tags">
+                    <span class="log-badge ${papelCor}">${papelTxt}</span>${acesso}
+                </div>
+            </div>`;
+    }).join('');
+}
+
+async function criarUsuarioAdmin(event) {
+    event.preventDefault();
+    const nome = document.getElementById('novoUsuarioNome').value.trim();
+    const email = document.getElementById('novoUsuarioEmail').value.trim();
+    const senha = document.getElementById('novoUsuarioSenha').value;
+    const papel = document.getElementById('novoUsuarioPapel').value;
+    try {
+        const resp = await fetch(`${API_BASE_URL}/usuarios`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nome, email, senha, papel })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.error || 'Falha ao criar usuário');
+        document.getElementById('formNovoUsuario').reset();
+        mostrarToast('Usuário criado com sucesso!', 'success');
+        carregarUsuarios();
+    } catch (e) {
+        mostrarToast(e.message, 'error');
     }
 }
 

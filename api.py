@@ -251,10 +251,22 @@ def health_check():
         'version': db.obter_configuracao('versao_sistema')
     })
 
+@app.route('/api/usuarios', methods=['GET'])
+@exige_admin
+def listar_usuarios():
+    """Lista os usuários (só admin). Não devolve a senha, só se o usuário TEM uma."""
+    try:
+        return jsonify({'success': True, 'usuarios': db.listar_usuarios()})
+    except Exception as e:
+        log_erro('Erro ao listar usuários', e)
+        return jsonify({'error': 'Erro ao listar usuários'}), 500
+
 @app.route('/api/usuarios', methods=['POST'])
 @exige_admin
 def criar_usuario():
-    """Criar novo usuário"""
+    """Criar novo usuário. Aceita senha (opcional) e papel ('admin'/'leitura').
+    Sem senha, o usuário existe mas NÃO consegue logar — por isso, para dar acesso
+    a alguém, informe a senha aqui."""
     try:
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
@@ -263,20 +275,36 @@ def criar_usuario():
         # Validações básicas
         if not data.get('nome'):
             return jsonify({'error': 'Nome é obrigatório'}), 400
-        
+
+        # Papel: só aceita valores conhecidos (nunca confia em texto livre do cliente)
+        papel = data.get('papel', 'leitura')
+        if papel not in ('admin', 'leitura'):
+            return jsonify({'error': "Papel deve ser 'admin' ou 'leitura'"}), 400
+
+        senha = data.get('senha') or ''
+        if senha and len(senha) < 6:
+            return jsonify({'error': 'A senha deve ter pelo menos 6 caracteres'}), 400
+
         usuario_id = db.criar_usuario(
             nome=data['nome'],
             email=data.get('email'),
             empresa=data.get('empresa'),
             telefone=data.get('telefone')
         )
-        
+        db.definir_papel_usuario(usuario_id, papel)
+        if senha:
+            # Guarda só o HASH da senha, nunca o texto puro
+            db.definir_senha_usuario(usuario_id, generate_password_hash(senha))
+
+        ip, ua = _req_ip_ua()
+        db.registrar_log(g.usuario_id, 'usuario_criado',
+                         f"{data['nome']} (papel: {papel})", ip, ua)
         return jsonify({
             'success': True,
             'message': 'Usuário criado com sucesso',
             'usuario_id': usuario_id
         }), 201
-        
+
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:

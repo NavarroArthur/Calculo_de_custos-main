@@ -366,6 +366,22 @@ class DatabaseManager:
         finally:
             conn.close()
 
+    def listar_usuarios(self):
+        """Lista os usuários (sem expor o hash da senha). Mostra se o usuário TEM
+        senha (tem_senha) para o admin saber quem consegue logar."""
+        conn = self._conectar()
+        try:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, nome, email, papel,
+                       (senha_hash IS NOT NULL AND senha_hash != '') AS tem_senha,
+                       created_at
+                FROM usuarios ORDER BY nome
+            ''')
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
     # ----------------------------------------------------------------------
     # Rate limiting de login (compartilhado entre workers via banco)
     # ----------------------------------------------------------------------

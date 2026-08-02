@@ -28,7 +28,7 @@
     <link rel="icon" href="favicon.ico">
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
     <meta name="theme-color" content="#2f6bff">
-    <link rel="stylesheet" href="style.css?v=19">
+    <link rel="stylesheet" href="style.css?v=21">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- jsPDF: unica dependencia de PDF (o html2pdf foi removido, nao era mais usado) -->
@@ -78,6 +78,10 @@
                         <button class="nav-btn" data-tab="logs" data-admin role="menuitem">
                             <i class="fas fa-clipboard-list" aria-hidden="true"></i>
                             Logs
+                        </button>
+                        <button class="nav-btn" data-tab="usuarios" data-admin role="menuitem">
+                            <i class="fas fa-users" aria-hidden="true"></i>
+                            Usuários
                         </button>
                         <div class="hud-sep"></div>
                         <button class="nav-btn" id="btnLogout" type="button" role="menuitem">
@@ -361,22 +365,6 @@
                             Salvar Configurações
                         </button>
                     </form>
-
-                    <!-- Backup do banco de dados -->
-                    <div class="produtos-section">
-                        <h3><i class="fas fa-database" aria-hidden="true"></i> Backup do banco</h3>
-                        <p class="produtos-hint">Baixe uma cópia do banco para o seu computador. É o backup que sobrevive a qualquer problema no servidor. Faça isso com frequência.</p>
-                        <div class="backup-acoes">
-                            <button type="button" class="action-btn primary" id="btnBaixarBackup">
-                                <i class="fas fa-download" aria-hidden="true"></i>
-                                Baixar backup (.db)
-                            </button>
-                            <button type="button" class="action-btn secondary" id="btnBackupServidor">
-                                <i class="fas fa-server" aria-hidden="true"></i>
-                                Criar cópia no servidor
-                            </button>
-                        </div>
-                    </div>
                 </div>
             </div>
 
@@ -438,6 +426,65 @@
                         </button>
                     </div>
                     <div id="listaLogs" class="logs-lista" aria-live="polite"></div>
+
+                    <!-- Backup do banco de dados (movido de Configurações: é tarefa de admin) -->
+                    <div class="produtos-section backup-section">
+                        <h3><i class="fas fa-database" aria-hidden="true"></i> Backup do banco</h3>
+                        <p class="produtos-hint">Baixe uma cópia do banco para o seu computador. É o backup que sobrevive a qualquer problema no servidor. Faça isso com frequência.</p>
+                        <div class="backup-acoes">
+                            <button type="button" class="action-btn primary" id="btnBaixarBackup">
+                                <i class="fas fa-download" aria-hidden="true"></i>
+                                Baixar backup (.db)
+                            </button>
+                            <button type="button" class="action-btn secondary" id="btnBackupServidor">
+                                <i class="fas fa-server" aria-hidden="true"></i>
+                                Criar cópia no servidor
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Aba de Usuários: só admin. Criar/ver quem tem acesso ao sistema. -->
+            <div class="tab-content" id="usuarios-tab">
+                <div class="form-container">
+                    <div class="form-header">
+                        <h2><i class="fas fa-users" aria-hidden="true"></i> Usuários</h2>
+                        <p>Quem tem acesso ao sistema. Para dar acesso a alguém, crie o usuário COM uma senha.</p>
+                    </div>
+
+                    <div id="listaUsuarios" class="usuarios-lista" aria-live="polite"></div>
+
+                    <form id="formNovoUsuario" class="usuario-novo">
+                        <h3><i class="fas fa-user-plus" aria-hidden="true"></i> Novo usuário</h3>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="novoUsuarioNome">Nome</label>
+                                <input type="text" id="novoUsuarioNome" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="novoUsuarioEmail">E-mail (usado para logar)</label>
+                                <input type="email" id="novoUsuarioEmail" autocomplete="off" required>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="novoUsuarioSenha">Senha (mín. 6 caracteres)</label>
+                                <input type="password" id="novoUsuarioSenha" autocomplete="new-password" minlength="6" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="novoUsuarioPapel">Papel</label>
+                                <select id="novoUsuarioPapel">
+                                    <option value="leitura">Leitura (só usa a calculadora)</option>
+                                    <option value="admin">Admin (acesso total)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <button type="submit" class="action-btn primary">
+                            <i class="fas fa-user-plus" aria-hidden="true"></i>
+                            Criar usuário
+                        </button>
+                    </form>
                 </div>
             </div>
         </main>
@@ -599,7 +646,7 @@
     <!-- Logica extraida do script.js (carregada antes dele) -->
     <script src="calculo.js?v=15"></script>
     <script src="validacao.js?v=15"></script>
-    <script src="script.js?v=19"></script>
+    <script src="script.js?v=21"></script>
     <!-- Carregados DEPOIS do script.js para sobrescrever a exportacao de PDF -->
     <script src="pdf-relatorio.js?v=15"></script>
     <script src="historico-selecao.js?v=15"></script>

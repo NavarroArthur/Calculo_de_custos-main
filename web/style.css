@@ -1564,6 +1564,36 @@ select:focus-visible {
 /* Botao carregar mais (historico) */
 .history-mais { display: flex; justify-content: center; margin-top: 1rem; }
 
+/* Secao de backup, agora no fim da aba de Logs: separada da lista por uma linha */
+.backup-section {
+    margin-top: 1.5rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--border-color, #e5e7eb);
+}
+
+/* --- Aba de Usuarios ---------------------------------------------------- */
+.usuarios-lista { display: flex; flex-direction: column; gap: 8px; margin: 1rem 0; }
+.usuario-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0.7rem 0.9rem;
+    background: var(--surface-color, #fff);
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 8px;
+}
+.usuario-info { display: flex; flex-direction: column; min-width: 0; }
+.usuario-nome { font-weight: 600; color: var(--text-primary, #111827); }
+.usuario-email { font-size: 0.82rem; color: var(--text-secondary, #6b7280); }
+.usuario-tags { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.usuario-novo {
+    margin-top: 1rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--border-color, #e5e7eb);
+}
+.usuario-novo h3 { margin: 0 0 0.75rem; font-size: 1rem; }
+
 /* --- 4) LABEL reage ao foco do campo (sem JS, so :focus-within) ---------- */
 .form-group:focus-within > label,
 .filter-field:focus-within > label {

@@ -719,10 +719,23 @@ class DatabaseManager:
                 calculos.append(calculo)
             
             return calculos
-            
+
         finally:
             conn.close()
-    
+
+    def remover_calculos_usuario(self, usuario_id: int) -> int:
+        """Apaga TODOS os cálculos de um usuário. Retorna quantos foram apagados.
+        Usado pelo 'Limpar histórico' — que antes só limpava a tela, sem apagar
+        de verdade no banco."""
+        conn = self._conectar()
+        try:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM calculos WHERE usuario_id = ?', (usuario_id,))
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            conn.close()
+
     def obter_todos_calculos(self, limite: int = 100, offset: int = 0) -> List[Dict]:
         """
         Obtém todos os cálculos do sistema
@@ -906,10 +919,12 @@ class DatabaseManager:
             except Exception as e:
                 print(f"Erro ao registrar log: {e}")
 
-    def listar_logs(self, limite: int = 100, offset: int = 0, acao: str = None):
+    def listar_logs(self, limite: int = 100, offset: int = 0, acao: str = None,
+                    de: str = None, ate: str = None):
         """Retorna as ocorrências mais recentes, já com o nome do usuário.
         Usa LEFT JOIN porque usuario_id pode ser NULL (ex.: falha de login de um
-        e-mail que nem existe) — com INNER JOIN essas linhas sumiriam do relatório."""
+        e-mail que nem existe) — com INNER JOIN essas linhas sumiriam do relatório.
+        Filtros opcionais: acao (tipo) e intervalo de datas de/ate (YYYY-MM-DD)."""
         conn = self._conectar()
         try:
             cursor = conn.cursor()
@@ -919,14 +934,38 @@ class DatabaseManager:
                 FROM logs_atividade l
                 LEFT JOIN usuarios u ON u.id = l.usuario_id
             '''
+            # Monta os filtros dinamicamente; valores sempre parametrizados (?)
+            condicoes = []
             params = []
             if acao:
-                sql += ' WHERE l.acao = ?'
+                condicoes.append('l.acao = ?')
                 params.append(acao)
+            if de:
+                condicoes.append('date(l.created_at) >= date(?)')
+                params.append(de)
+            if ate:
+                condicoes.append('date(l.created_at) <= date(?)')
+                params.append(ate)
+            if condicoes:
+                sql += ' WHERE ' + ' AND '.join(condicoes)
             sql += ' ORDER BY l.id DESC LIMIT ? OFFSET ?'
             params.extend([limite, offset])
             cursor.execute(sql, params)
             return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def limpar_logs_antigos(self, dias: int = 90) -> int:
+        """Apaga logs com mais de N dias (retenção). Retorna quantos foram apagados.
+        Evita que a tabela de logs cresça para sempre."""
+        conn = self._conectar()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM logs_atividade WHERE created_at < datetime('now', ?)",
+                (f'-{int(dias)} days',))
+            conn.commit()
+            return cursor.rowcount
         finally:
             conn.close()
 

@@ -213,14 +213,33 @@ def login():
 @app.route('/api/logs', methods=['GET'])
 @exige_admin
 def listar_logs():
-    """Lista as ocorrências registradas (só admin). Aceita ?limite, ?offset e ?acao."""
+    """Lista as ocorrências (só admin). Aceita ?limite, ?offset, ?acao, ?de, ?ate."""
     try:
-        limite, offset = _paginacao(100)
+        limite, offset = _paginacao(200)
         acao = request.args.get('acao') or None
-        return jsonify({'success': True, 'logs': db.listar_logs(limite, offset, acao)})
+        de = request.args.get('de') or None
+        ate = request.args.get('ate') or None
+        return jsonify({'success': True,
+                        'logs': db.listar_logs(limite, offset, acao, de, ate)})
     except Exception as e:
         log_erro('Erro ao listar logs', e)
         return jsonify({'error': 'Erro ao listar logs'}), 500
+
+@app.route('/api/logs/antigos', methods=['DELETE'])
+@exige_admin
+def limpar_logs_antigos():
+    """Apaga logs com mais de ?dias dias (retenção). Padrão 90. Só admin."""
+    try:
+        dias = request.args.get('dias', 90, type=int)
+        dias = max(1, dias)   # nunca apagar "tudo" por engano com dias<=0
+        apagados = db.limpar_logs_antigos(dias)
+        ip, ua = _req_ip_ua()
+        db.registrar_log(g.usuario_id, 'logs_limpos',
+                         f'{apagados} log(s) com mais de {dias} dias apagados', ip, ua)
+        return jsonify({'success': True, 'apagados': apagados})
+    except Exception as e:
+        log_erro('Erro ao limpar logs antigos', e)
+        return jsonify({'error': 'Erro ao limpar logs antigos'}), 500
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -339,6 +358,19 @@ def obter_meus_calculos():
         log_erro('Erro ao obter meus cálculos', e)
         return jsonify({'error': 'Erro ao obter cálculos'}), 500
 
+@app.route('/api/calculos/meus', methods=['DELETE'])
+def limpar_meus_calculos():
+    """Apaga TODOS os cálculos do usuário logado (usado pelo 'Limpar histórico').
+    Só apaga os DELE — a identidade vem do token, não do cliente."""
+    try:
+        apagados = db.remover_calculos_usuario(g.usuario_id)
+        ip, ua = _req_ip_ua()
+        db.registrar_log(g.usuario_id, 'historico_limpo', f'{apagados} cálculo(s) apagado(s)', ip, ua)
+        return jsonify({'success': True, 'apagados': apagados})
+    except Exception as e:
+        log_erro('Erro ao limpar histórico', e)
+        return jsonify({'error': 'Erro ao limpar histórico'}), 500
+
 @app.route('/api/calculos/usuario/<int:usuario_id>', methods=['GET'])
 def obter_calculos_usuario(usuario_id):
     """Obter cálculos de um usuário específico (por id).
@@ -435,8 +467,16 @@ def atualizar_configuracoes():
                 return jsonify({'error': f'{chave} deve ser um número'}), 400
             if v < 0:
                 return jsonify({'error': f'{chave} não pode ser negativo'}), 400
+            # Guarda o valor ANTIGO antes de sobrescrever, para registrar a mudança
+            antigo = db.obter_configuracao(chave)
             db.atualizar_configuracao(chave, str(v))
             atualizadas += 1
+            # Auditoria: mudar preço de insumo afeta TODOS os cálculos futuros,
+            # então registramos quem mudou e de/para (aparece no painel de Logs).
+            if str(antigo) != str(v):
+                ip, ua = _req_ip_ua()
+                db.registrar_log(getattr(g, 'usuario_id', None), 'config_alterada',
+                                 f'{chave}: {antigo} -> {v}', ip, ua)
 
         return jsonify({
             'success': True,

@@ -22,7 +22,13 @@
         base-uri 'self';
         frame-ancestors 'none'">
     <title>Calculadora de Custos - Beneficiamento de Pescados</title>
-    <link rel="stylesheet" href="style.css?v=17">
+    <!-- Ícones da aba do navegador (favicon). SVG para telas modernas, PNG/ICO de reserva. -->
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
+    <link rel="icon" href="favicon.ico">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <meta name="theme-color" content="#2f6bff">
+    <link rel="stylesheet" href="style.css?v=19">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- jsPDF: unica dependencia de PDF (o html2pdf foi removido, nao era mais usado) -->
@@ -236,6 +242,9 @@
                         </div>
                     </div>
 
+                    <!-- Resumo dos calculos filtrados (preenchido por JS) -->
+                    <div class="history-resumo" id="historyResumo" hidden></div>
+
                     <!-- Busca e filtros do historico -->
                     <div class="history-filters">
                         <div class="filter-field">
@@ -300,6 +309,14 @@
                             <h3>Nenhum cálculo realizado ainda</h3>
                             <p>Realize seu primeiro cálculo para ver o histórico aqui</p>
                         </div>
+                    </div>
+
+                    <!-- Carrega mais cálculos do servidor (aparece só quando ha mais) -->
+                    <div class="history-mais">
+                        <button type="button" class="action-btn secondary" id="btnCarregarMais" hidden>
+                            <i class="fas fa-arrow-down" aria-hidden="true"></i>
+                            Carregar mais
+                        </button>
                     </div>
                 </div>
             </div>
@@ -395,20 +412,29 @@
                         <h2><i class="fas fa-clipboard-list" aria-hidden="true"></i> Logs do sistema</h2>
                         <p>Ocorrencias registradas: logins, tentativas falhas, acessos negados e erros.</p>
                     </div>
-                    <div class="produtos-toolbar">
+                    <div class="produtos-toolbar logs-toolbar">
                         <select id="logsFiltro" aria-label="Filtrar por tipo de ocorrencia">
                             <option value="">Todos os tipos</option>
                             <option value="login">Login (sucesso)</option>
                             <option value="login_falha">Login (falha)</option>
                             <option value="login_bloqueado">Login bloqueado</option>
                             <option value="acesso_negado">Acesso negado</option>
+                            <option value="config_alterada">Preço alterado</option>
+                            <option value="historico_limpo">Histórico limpo</option>
                             <option value="erro">Erro</option>
                             <option value="calculo_salvo">Calculo salvo</option>
                             <option value="usuario_criado">Usuario criado</option>
                         </select>
+                        <label class="logs-data">De <input type="date" id="logsDe" aria-label="Logs a partir de"></label>
+                        <label class="logs-data">Até <input type="date" id="logsAte" aria-label="Logs até"></label>
                         <button type="button" class="action-btn secondary" id="btnAtualizarLogs">
                             <i class="fas fa-rotate" aria-hidden="true"></i>
                             Atualizar
+                        </button>
+                        <button type="button" class="action-btn secondary" id="btnLimparLogsAntigos"
+                                title="Apaga logs com mais de 90 dias">
+                            <i class="fas fa-broom" aria-hidden="true"></i>
+                            Limpar antigos (90d)
                         </button>
                     </div>
                     <div id="listaLogs" class="logs-lista" aria-live="polite"></div>
@@ -573,7 +599,7 @@
     <!-- Logica extraida do script.js (carregada antes dele) -->
     <script src="calculo.js?v=15"></script>
     <script src="validacao.js?v=15"></script>
-    <script src="script.js?v=17"></script>
+    <script src="script.js?v=19"></script>
     <!-- Carregados DEPOIS do script.js para sobrescrever a exportacao de PDF -->
     <script src="pdf-relatorio.js?v=15"></script>
     <script src="historico-selecao.js?v=15"></script>

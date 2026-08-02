@@ -56,6 +56,8 @@ const campos = {
 
 // Histórico de cálculos
 let historicoCalculos = JSON.parse(localStorage.getItem('historicoCalculos') || '[]');
+let historicoLimite = 100;        // quantos cálculos buscar do servidor
+let historicoTemMais = false;     // se o servidor pode ter mais além do limite atual
 
 // Inicialização
 document.addEventListener('DOMContentLoaded', function() {
@@ -139,6 +141,15 @@ function inicializarEventos() {
     if (btnLogs) btnLogs.addEventListener('click', carregarLogs);
     const filtroLogs = document.getElementById('logsFiltro');
     if (filtroLogs) filtroLogs.addEventListener('change', carregarLogs);
+    const filtroLogsDe = document.getElementById('logsDe');
+    if (filtroLogsDe) filtroLogsDe.addEventListener('change', carregarLogs);
+    const filtroLogsAte = document.getElementById('logsAte');
+    if (filtroLogsAte) filtroLogsAte.addEventListener('change', carregarLogs);
+    const btnLimparLogs = document.getElementById('btnLimparLogsAntigos');
+    if (btnLimparLogs) btnLimparLogs.addEventListener('click', limparLogsAntigos);
+    // Historico: carregar mais
+    const btnMaisHist = document.getElementById('btnCarregarMais');
+    if (btnMaisHist) btnMaisHist.addEventListener('click', carregarMaisHistorico);
     const btnLogout = document.getElementById('btnLogout');
     if (btnLogout) btnLogout.addEventListener('click', logout);
     const btnBaixarBackup = document.getElementById('btnBaixarBackup');
@@ -320,11 +331,11 @@ function exibirResultados(dados, resultados) {
             <h4><i class="fas fa-list"></i> Detalhamento dos Custos</h4>
             <div class="detail-list">
                 <div class="detail-item">
-                    <span class="detail-item-label">Sacos de gelo (${sacos_de_gelo} un.)</span>
+                    <span class="detail-item-label">Sacos de gelo (${sacos_de_gelo} un. &times; R$ ${(sacos_de_gelo ? custo_sacos_gelo / sacos_de_gelo : 0).toFixed(2)})</span>
                     <span class="detail-item-value">R$ ${custo_sacos_gelo.toFixed(2)}</span>
                 </div>
                 <div class="detail-item">
-                    <span class="detail-item-label">Caixas de papelão (${caixa_papelao} un.)</span>
+                    <span class="detail-item-label">Caixas de papelão (${caixa_papelao} un. &times; R$ ${(caixa_papelao ? custo_papelao / caixa_papelao : 0).toFixed(2)})</span>
                     <span class="detail-item-value">R$ ${custo_papelao.toFixed(2)}</span>
                 </div>
                 <div class="detail-item">
@@ -622,6 +633,7 @@ async function fazerLogin(event) {
         localStorage.setItem('papel', data.papel || 'leitura');  // guarda o papel p/ a UI
         document.getElementById('login_senha').value = '';
         esconderLogin();
+        switchTab('calculator');   // ao logar, sempre cai na Calculadora
         mostrarToast(`Bem-vindo, ${data.nome}!`, 'success');
         inicializarSistema();
     } catch (error) {
@@ -1011,7 +1023,7 @@ async function salvarNoBanco(dados) {
 // Carregar histórico da API
 async function carregarHistoricoAPI() {
     try {
-        const response = await fetch(`${API_BASE_URL}/calculos/meus?limite=100`);
+        const response = await fetch(`${API_BASE_URL}/calculos/meus?limite=${historicoLimite}`);
         if (!response.ok) {
             throw new Error('Erro ao carregar histórico');
         }
@@ -1044,7 +1056,9 @@ async function carregarHistoricoAPI() {
                     custo_final: calculo.custo_final
                 }
             }));
-            
+
+            // Se veio a quantidade cheia do limite, provavelmente há mais no servidor
+            historicoTemMais = (data.calculos.length >= historicoLimite);
             atualizarHistorico();
             console.log('✅ Histórico carregado da API:', historicoCalculos.length, 'cálculos');
         }
@@ -1132,26 +1146,48 @@ const LOG_TIPOS = {
     login_falha:     { texto: 'Login falhou',    cor: 'aviso' },
     login_bloqueado: { texto: 'Login bloqueado', cor: 'erro'  },
     acesso_negado:   { texto: 'Acesso negado',   cor: 'erro'  },
+    config_alterada: { texto: 'Preço alterado',  cor: 'aviso' },
+    historico_limpo: { texto: 'Histórico limpo', cor: 'aviso' },
+    logs_limpos:     { texto: 'Logs limpos',     cor: 'aviso' },
     erro:            { texto: 'Erro',            cor: 'erro'  },
     calculo_salvo:   { texto: 'Calculo salvo',   cor: 'ok'    },
     usuario_criado:  { texto: 'Usuario criado',  cor: 'ok'    }
 };
 
-// Busca os logs no servidor (respeitando o filtro) e renderiza a lista.
+// Busca os logs no servidor (respeitando filtro de tipo e datas) e renderiza a lista.
 async function carregarLogs() {
     const lista = document.getElementById('listaLogs');
     if (!lista) return;
     const filtro = document.getElementById('logsFiltro')?.value || '';
+    const de = document.getElementById('logsDe')?.value || '';
+    const ate = document.getElementById('logsAte')?.value || '';
     lista.innerHTML = '<p class="logs-vazio">Carregando...</p>';
     try {
-        // encodeURIComponent: escapa o valor para montar a query string com seguranca
-        const url = `${API_BASE_URL}/logs?limite=200` + (filtro ? `&acao=${encodeURIComponent(filtro)}` : '');
+        // encodeURIComponent: escapa cada valor para montar a query string com seguranca
+        let url = `${API_BASE_URL}/logs?limite=200`;
+        if (filtro) url += `&acao=${encodeURIComponent(filtro)}`;
+        if (de) url += `&de=${encodeURIComponent(de)}`;
+        if (ate) url += `&ate=${encodeURIComponent(ate)}`;
         const resp = await fetch(url);
         if (!resp.ok) throw new Error('Falha ao carregar logs');
         const data = await resp.json();
         renderLogs(data.logs || []);
     } catch (e) {
         lista.innerHTML = '<p class="logs-vazio">Nao foi possivel carregar os logs.</p>';
+    }
+}
+
+// Apaga logs com mais de 90 dias (retenção), com confirmação.
+async function limparLogsAntigos() {
+    if (!confirm('Apagar todos os logs com mais de 90 dias? Esta ação não pode ser desfeita.')) return;
+    try {
+        const resp = await fetch(`${API_BASE_URL}/logs/antigos?dias=90`, { method: 'DELETE' });
+        if (!resp.ok) throw new Error('Falha');
+        const data = await resp.json();
+        mostrarToast(`${data.apagados || 0} log(s) antigo(s) apagado(s).`, 'success');
+        carregarLogs();
+    } catch (e) {
+        mostrarToast('Não foi possível limpar os logs antigos.', 'error');
     }
 }
 
@@ -1214,6 +1250,26 @@ function limparFiltros() {
 }
 
 // Gerenciamento do histórico
+// Mostra um resumo dos cálculos filtrados: quantidade, custo final somado e % média.
+function renderResumoHistorico(lista) {
+    const el = document.getElementById('historyResumo');
+    if (!el) return;
+    if (!lista.length) { el.hidden = true; return; }
+    let custoTotal = 0, somaPct = 0, nPct = 0;
+    lista.forEach(function (c) {
+        const r = c.resultados || {};
+        custoTotal += Number(r.custo_final) || 0;
+        if (r.porcentagem != null && !isNaN(r.porcentagem)) { somaPct += Number(r.porcentagem); nPct++; }
+    });
+    const pctMedia = nPct ? (somaPct / nPct) : 0;
+    const money = v => 'R$ ' + (Number(v) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    el.innerHTML =
+        `<div class="resumo-card"><span class="resumo-num">${lista.length}</span><span class="resumo-rot">cálculo(s)</span></div>` +
+        `<div class="resumo-card"><span class="resumo-num">${money(custoTotal)}</span><span class="resumo-rot">custo final somado</span></div>` +
+        `<div class="resumo-card"><span class="resumo-num">${pctMedia.toFixed(1)}%</span><span class="resumo-rot">beneficiamento médio</span></div>`;
+    el.hidden = false;
+}
+
 function atualizarHistorico() {
     const historyList = document.getElementById('historyList');
     const historyCount = document.getElementById('historyCount');
@@ -1223,6 +1279,11 @@ function atualizarHistorico() {
 
     // Aplica os filtros ativos (produto, categoria, periodo)
     const lista = filtrarCalculos();
+
+    // Resumo dos cálculos filtrados e botão "carregar mais"
+    renderResumoHistorico(lista);
+    const btnMais = document.getElementById('btnCarregarMais');
+    if (btnMais) btnMais.hidden = !historicoTemMais;
 
     // Atualiza chips de filtro ativo, contador de resultados e botao Limpar.
     // (definido em melhorias.js; guardamos com typeof para nao quebrar caso
@@ -1349,17 +1410,31 @@ function removerHistorico(id) {
     }
 }
 
-function limparHistorico() {
+async function limparHistorico() {
     if (historicoCalculos.length === 0) {
         mostrarToast('O histórico já está vazio!', 'warning');
         return;
     }
-    
-    if (confirm('Tem certeza que deseja limpar todo o histórico? Esta ação não pode ser desfeita.')) {
+    if (!confirm('Tem certeza que deseja apagar TODOS os seus cálculos? Esta ação apaga do banco e não pode ser desfeita.')) {
+        return;
+    }
+    try {
+        // Apaga de verdade no servidor (antes só limpava a tela e voltava ao recarregar)
+        const resp = await fetch(`${API_BASE_URL}/calculos/meus`, { method: 'DELETE' });
+        if (!resp.ok) throw new Error('Falha ao apagar no servidor');
+        const data = await resp.json();
         historicoCalculos = [];
         localStorage.removeItem('historicoCalculos');
         atualizarHistorico();
-        mostrarToast('Histórico limpo com sucesso!', 'success');
+        mostrarToast(`Histórico apagado (${data.apagados || 0} cálculo(s)).`, 'success');
+    } catch (e) {
+        mostrarToast('Não foi possível apagar o histórico. Tente novamente.', 'error');
     }
+}
+
+// Busca mais cálculos do servidor (aumenta o limite e recarrega)
+async function carregarMaisHistorico() {
+    historicoLimite += 100;
+    await carregarHistoricoAPI();
 }
 

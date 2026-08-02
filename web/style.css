@@ -1539,6 +1539,31 @@ select:focus-visible {
 .log-detalhes { font-size: 0.9rem; color: var(--text-primary, #111827); word-break: break-word; }
 .log-meta { font-size: 0.78rem; color: var(--text-secondary, #6b7280); margin-top: 2px; }
 
+/* Toolbar de logs: campos de data e botoes */
+.logs-toolbar { flex-wrap: wrap; align-items: center; gap: 8px; }
+.logs-data { display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--text-secondary, #6b7280); }
+.logs-data input { width: auto; }
+
+/* Resumo do historico (cards com numeros) */
+.history-resumo {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin: 0 0 1rem;
+}
+.resumo-card {
+    display: flex;
+    flex-direction: column;
+    padding: 0.7rem 0.9rem;
+    background: rgba(59, 130, 246, 0.08);
+    border-radius: 10px;
+}
+.resumo-num { font-size: 1.25rem; font-weight: 700; color: var(--text-primary, #111827); }
+.resumo-rot { font-size: 0.78rem; color: var(--text-secondary, #6b7280); margin-top: 2px; }
+
+/* Botao carregar mais (historico) */
+.history-mais { display: flex; justify-content: center; margin-top: 1rem; }
+
 /* --- 4) LABEL reage ao foco do campo (sem JS, so :focus-within) ---------- */
 .form-group:focus-within > label,
 .filter-field:focus-within > label {

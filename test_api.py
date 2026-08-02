@@ -164,3 +164,134 @@ def test_listar_usuarios_so_admin(client):
     assert client.get('/api/usuarios', headers=auth(tok)).status_code == 403
     A = auth(token_admin(client))
     assert client.get('/api/usuarios', headers=A).status_code == 200
+
+
+# --- Permissões granulares por aba ----------------------------------------
+
+def test_permissao_produtos_libera_escrita(client):
+    A = auth(token_admin(client))
+    # usuário COM permissão de produtos
+    client.post('/api/usuarios', json={'nome': 'Prod', 'email': 'p1@x.com',
+                'senha': 'segredo1', 'papel': 'leitura', 'permissoes': ['produtos']}, headers=A)
+    tk = login(client, 'p1@x.com', 'segredo1')[1]
+    assert 'produtos' in tk['permissoes']
+    H = auth(tk['token'])
+    assert client.post('/api/produtos', json={'nome': 'Peixe', 'preco_kg': 5}, headers=H).status_code == 201
+
+
+def test_sem_permissao_produtos_bloqueia_escrita(client):
+    A = auth(token_admin(client))
+    client.post('/api/usuarios', json={'nome': 'SoCalc', 'email': 'p2@x.com',
+                'senha': 'segredo1', 'papel': 'leitura', 'permissoes': []}, headers=A)
+    tk = login(client, 'p2@x.com', 'segredo1')[1]
+    H = auth(tk['token'])
+    # não tem 'produtos' -> não pode criar
+    assert client.post('/api/produtos', json={'nome': 'X', 'preco_kg': 5}, headers=H).status_code == 403
+    # mas continua conseguindo LER produtos (base da calculadora)
+    assert client.get('/api/produtos', headers=H).status_code == 200
+
+
+def test_permissao_invalida_e_ignorada(client):
+    A = auth(token_admin(client))
+    client.post('/api/usuarios', json={'nome': 'Hacker', 'email': 'p3@x.com',
+                'senha': 'segredo1', 'papel': 'leitura', 'permissoes': ['produtos', 'config', 'logs']}, headers=A)
+    tk = login(client, 'p3@x.com', 'segredo1')[1]
+    # 'config' e 'logs' não são permissões válidas -> foram descartadas
+    assert set(tk['permissoes']) == {'produtos'}
+
+
+def test_editar_permissoes_e_anti_lockout(client):
+    A = auth(token_admin(client))
+    r = client.post('/api/usuarios', json={'nome': 'Edit', 'email': 'p4@x.com',
+                    'senha': 'segredo1', 'papel': 'leitura', 'permissoes': []}, headers=A)
+    uid = r.get_json()['usuario_id']
+    # admin dá a aba produtos a esse usuário
+    assert client.put(f'/api/usuarios/{uid}', json={'permissoes': ['produtos']}, headers=A).status_code == 200
+    # admin NÃO pode remover o próprio acesso admin
+    uid_admin = api.serializer.loads(token_admin(client))['uid']
+    assert client.put(f'/api/usuarios/{uid_admin}', json={'papel': 'leitura'}, headers=A).status_code == 400
+
+
+# --- Tipos de embalagem ----------------------------------------------------
+
+def test_embalagem_crud_e_vinculo(client):
+    A = auth(token_admin(client))
+    # criar
+    r = client.post('/api/embalagens', json={'nome': 'Caixa 5kg', 'valor': 2.5}, headers=A)
+    assert r.status_code == 201
+    eid = r.get_json()['embalagem_id']
+    # nome duplicado -> 400
+    assert client.post('/api/embalagens', json={'nome': 'Caixa 5kg', 'valor': 9}, headers=A).status_code == 400
+    # vincular a um produto e conferir que volta no JOIN
+    client.post('/api/produtos', json={'nome': 'Tilapia', 'preco_kg': 20}, headers=A)
+    pid = [p for p in client.get('/api/produtos', headers=A).get_json()['produtos']
+           if p['nome'] == 'Tilapia'][0]['id']
+    assert client.put(f'/api/produtos/{pid}', json={'embalagem_id': eid}, headers=A).status_code == 200
+    prod = [p for p in client.get('/api/produtos', headers=A).get_json()['produtos'] if p['id'] == pid][0]
+    assert prod['embalagem_nome'] == 'Caixa 5kg'
+    assert prod['embalagem_valor'] == 2.5
+    # remover a embalagem -> o produto fica sem embalagem (NULL)
+    assert client.delete(f'/api/embalagens/{eid}', headers=A).status_code == 200
+    prod = [p for p in client.get('/api/produtos', headers=A).get_json()['produtos'] if p['id'] == pid][0]
+    assert prod['embalagem_nome'] is None
+
+
+def test_embalagem_exige_permissao_produtos(client):
+    tok = api.serializer.dumps({'uid': 2, 'papel': 'leitura', 'permissoes': []})
+    H = auth(tok)
+    # sem permissão de produtos -> não cria embalagem, mas pode LER
+    assert client.post('/api/embalagens', json={'nome': 'X', 'valor': 1}, headers=H).status_code == 403
+    assert client.get('/api/embalagens', headers=H).status_code == 200
+
+
+# --- Lotes -----------------------------------------------------------------
+
+def _novo_produto(client, A, nome):
+    client.post('/api/produtos', json={'nome': nome, 'preco_kg': 10}, headers=A)
+    return [p for p in client.get('/api/produtos', headers=A).get_json()['produtos']
+            if p['nome'] == nome][0]
+
+def test_lote_crud_e_ordem_e_historico(client):
+    A = auth(token_admin(client))
+    pid = _novo_produto(client, A, 'Merluza Lote')['id']
+    # dois lotes com validades diferentes
+    assert client.post(f'/api/produtos/{pid}/lotes',
+                       json={'codigo': 'L-B', 'validade': '2026-12-01', 'quantidade': 25}, headers=A).status_code == 201
+    assert client.post(f'/api/produtos/{pid}/lotes',
+                       json={'codigo': 'L-A', 'validade': '2026-10-01', 'quantidade': 40}, headers=A).status_code == 201
+    lotes = client.get(f'/api/produtos/{pid}/lotes', headers=A).get_json()['lotes']
+    # ordenado pela validade mais próxima primeiro
+    assert [l['codigo'] for l in lotes] == ['L-A', 'L-B']
+    # o evento de criação do lote entra no histórico do produto
+    hist = client.get(f'/api/produtos/{pid}/historico', headers=A).get_json()['historico']
+    assert any(h['campo'] == 'lote' for h in hist)
+    # editar e remover
+    lid = lotes[0]['id']
+    assert client.put(f'/api/lotes/{lid}', json={'codigo': 'L-A2', 'validade': '2026-10-05', 'quantidade': 30}, headers=A).status_code == 200
+    assert client.delete(f'/api/lotes/{lid}', headers=A).status_code == 200
+    assert len(client.get(f'/api/produtos/{pid}/lotes', headers=A).get_json()['lotes']) == 1
+
+def test_produto_traz_proxima_validade(client):
+    A = auth(token_admin(client))
+    pid = _novo_produto(client, A, 'Salmao Val')['id']
+    client.post(f'/api/produtos/{pid}/lotes', json={'codigo': 'S1', 'validade': '2027-01-01'}, headers=A)
+    prod = [p for p in client.get('/api/produtos', headers=A).get_json()['produtos'] if p['id'] == pid][0]
+    assert prod['proxima_validade'] == '2027-01-01'
+    assert prod['num_lotes'] == 1
+
+def test_lote_exige_permissao_produtos(client):
+    A = auth(token_admin(client))
+    pid = _novo_produto(client, A, 'Panga Perm')['id']
+    tok = api.serializer.dumps({'uid': 2, 'papel': 'leitura', 'permissoes': []})
+    H = auth(tok)
+    assert client.post(f'/api/produtos/{pid}/lotes', json={'codigo': 'X', 'validade': '2026-01-01'}, headers=H).status_code == 403
+    assert client.get(f'/api/produtos/{pid}/lotes', headers=H).status_code == 200
+
+def test_tabelas_mortas_removidas(client):
+    import sqlite3
+    con = sqlite3.connect(api.db.db_path)
+    tabs = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    con.close()
+    assert 'historico_precos' not in tabs
+    assert 'historico_validades' not in tabs
+    assert 'lotes' in tabs

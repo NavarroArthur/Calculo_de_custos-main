@@ -147,29 +147,9 @@ class DatabaseManager:
                 )
             ''')
 
-            # Tabela de histórico de preços: 1 linha por alteração de preço de um produto
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS historico_precos (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    produto_id INTEGER NOT NULL,
-                    preco_anterior REAL,
-                    preco_novo REAL NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (produto_id) REFERENCES produtos (id)
-                )
-            ''')
-
-            # Tabela de histórico de validades: 1 linha por alteração de validade
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS historico_validades (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    produto_id INTEGER NOT NULL,
-                    validade_anterior TEXT,
-                    validade_nova TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (produto_id) REFERENCES produtos (id)
-                )
-            ''')
+            # (As tabelas historico_precos e historico_validades foram descontinuadas:
+            #  o histórico agora é unificado em historico_produto. Elas são migradas e
+            #  removidas mais abaixo, no init.)
 
             # Histórico UNIFICADO de alterações do produto (audit log):
             # cada linha registra QUAL campo mudou (preco/validade/lote/fabricacao),
@@ -186,12 +166,42 @@ class DatabaseManager:
                 )
             ''')
 
+            # Tabela de tipos de embalagem (nome + valor). Um produto pode apontar
+            # para uma embalagem pela coluna produtos.embalagem_id.
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS embalagens (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nome TEXT UNIQUE NOT NULL,
+                    valor REAL NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
+            # Tabela de LOTES: cada produto pode ter vários lotes (partidas), e cada
+            # lote tem o seu próprio código, fabricação, validade e quantidade. É isto
+            # que dá o controle de perecível (dois lotes com validades diferentes).
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS lotes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    produto_id INTEGER NOT NULL,
+                    codigo TEXT,
+                    fabricacao TEXT,
+                    validade TEXT,
+                    quantidade REAL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (produto_id) REFERENCES produtos (id)
+                )
+            ''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_lotes_produto ON lotes(produto_id)')
+
             # Migração: adiciona as colunas de perfil na tabela produtos, se faltarem
             self._migrar_colunas_produtos(cursor)
             # Migração: adiciona a coluna de senha na tabela usuarios (para login)
             self._migrar_usuarios_senha(cursor)
             # Migração: adiciona a coluna de papel (admin/leitura) para controle de acesso
             self._migrar_usuarios_papel(cursor)
+            # Migração: adiciona a coluna de permissoes (abas liberadas por usuário)
+            self._migrar_usuarios_permissoes(cursor)
 
             # Tabela para o controle de tentativas de login (rate limiting).
             # Fica no banco (e não na memória do processo) para ser COMPARTILHADA
@@ -213,6 +223,13 @@ class DatabaseManager:
             self._insert_default_produtos(cursor)
             # Migração única: unifica os históricos antigos (preços/validades) no novo formato
             self._migrar_historico_unificado(cursor)
+            # Migração única: transforma o lote/validade/fabricação atual de cada produto
+            # em um "lote inicial" na nova tabela de lotes.
+            self._migrar_lotes_iniciais(cursor)
+            # Limpeza: as tabelas de histórico antigas (precos/validades) já foram
+            # migradas para historico_produto e não são mais usadas. Podem sair.
+            cursor.execute('DROP TABLE IF EXISTS historico_precos')
+            cursor.execute('DROP TABLE IF EXISTS historico_validades')
 
             # Criar índices para melhor performance
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_calculos_usuario_id ON calculos(usuario_id)')
@@ -277,11 +294,13 @@ class DatabaseManager:
         'quantidade': 'REAL',
         'unidade': 'TEXT',
         'peso_unitario': 'REAL',
+        # Tipo de embalagem escolhido (referência leve para a tabela 'embalagens').
+        'embalagem_id': 'INTEGER',
     }
     # Whitelist dos campos que o usuário pode editar (usada para montar o UPDATE com segurança).
     CAMPOS_EDITAVEIS_PRODUTO = ['nome', 'preco_kg', 'validade', 'fornecedor',
                                 'categoria', 'lote', 'fabricacao', 'observacoes',
-                                'quantidade', 'unidade', 'peso_unitario']
+                                'quantidade', 'unidade', 'peso_unitario', 'embalagem_id']
 
     def _migrar_colunas_produtos(self, cursor):
         """Adiciona as colunas de perfil na tabela produtos, se ainda não existirem.
@@ -300,24 +319,51 @@ class DatabaseManager:
         if cursor.fetchone():
             return  # ja migrado
 
-        # Copia o histórico de preços antigo
-        cursor.execute('SELECT produto_id, preco_anterior, preco_novo, created_at FROM historico_precos')
-        for pid, ant, nov, dt in cursor.fetchall():
-            cursor.execute(
-                'INSERT INTO historico_produto (produto_id, campo, valor_anterior, valor_novo, created_at) VALUES (?, ?, ?, ?, ?)',
-                (pid, 'preco', None if ant is None else str(ant), str(nov), dt))
+        def tabela_existe(nome):
+            cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (nome,))
+            return cursor.fetchone() is not None
 
-        # Copia o histórico de validades antigo
-        cursor.execute('SELECT produto_id, validade_anterior, validade_nova, created_at FROM historico_validades')
-        for pid, ant, nov, dt in cursor.fetchall():
-            cursor.execute(
-                'INSERT INTO historico_produto (produto_id, campo, valor_anterior, valor_novo, created_at) VALUES (?, ?, ?, ?, ?)',
-                (pid, 'validade', ant, nov, dt))
+        # Copia o histórico de preços antigo (se a tabela ainda existir)
+        if tabela_existe('historico_precos'):
+            cursor.execute('SELECT produto_id, preco_anterior, preco_novo, created_at FROM historico_precos')
+            for pid, ant, nov, dt in cursor.fetchall():
+                cursor.execute(
+                    'INSERT INTO historico_produto (produto_id, campo, valor_anterior, valor_novo, created_at) VALUES (?, ?, ?, ?, ?)',
+                    (pid, 'preco', None if ant is None else str(ant), str(nov), dt))
+
+        # Copia o histórico de validades antigo (se a tabela ainda existir)
+        if tabela_existe('historico_validades'):
+            cursor.execute('SELECT produto_id, validade_anterior, validade_nova, created_at FROM historico_validades')
+            for pid, ant, nov, dt in cursor.fetchall():
+                cursor.execute(
+                    'INSERT INTO historico_produto (produto_id, campo, valor_anterior, valor_novo, created_at) VALUES (?, ?, ?, ?, ?)',
+                    (pid, 'validade', ant, nov, dt))
 
         # Marca como migrado para não repetir
         cursor.execute(
             "INSERT OR REPLACE INTO configuracoes (chave, valor, descricao) "
             "VALUES ('migrou_historico_unificado', 'true', 'Historico unificado ja migrado')")
+
+    def _migrar_lotes_iniciais(self, cursor):
+        """Migração ÚNICA: transforma o lote/validade/fabricação que hoje vive em cada
+        produto num 'lote inicial' na tabela lotes, para não perder o que já existe.
+        Guardada por flag."""
+        cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'migrou_lotes_iniciais'")
+        if cursor.fetchone():
+            return
+        cursor.execute('''
+            SELECT id, lote, fabricacao, validade, quantidade FROM produtos
+            WHERE (lote IS NOT NULL AND lote != '')
+               OR (validade IS NOT NULL AND validade != '')
+               OR (fabricacao IS NOT NULL AND fabricacao != '')
+        ''')
+        for pid, lote, fab, val, qtd in cursor.fetchall():
+            cursor.execute(
+                'INSERT INTO lotes (produto_id, codigo, fabricacao, validade, quantidade) '
+                'VALUES (?, ?, ?, ?, ?)', (pid, lote, fab, val, qtd))
+        cursor.execute(
+            "INSERT OR REPLACE INTO configuracoes (chave, valor, descricao) "
+            "VALUES ('migrou_lotes_iniciais', 'true', 'Lotes iniciais ja migrados')")
 
     def _migrar_usuarios_senha(self, cursor):
         """Adiciona a coluna senha_hash na tabela usuarios, se ainda não existir."""
@@ -337,6 +383,17 @@ class DatabaseManager:
             cursor.execute(
                 "ALTER TABLE usuarios ADD COLUMN papel TEXT NOT NULL DEFAULT 'leitura'")
 
+    def _migrar_usuarios_permissoes(self, cursor):
+        """Adiciona a coluna 'permissoes' (abas liberadas para usuários comuns).
+        É uma lista separada por vírgula, ex.: 'history,produtos'. A Calculadora é
+        sempre liberada (base). O admin ignora isto (tem acesso a tudo).
+        Default 'history' mantém o comportamento antigo (usuário comum via o histórico)."""
+        cursor.execute('PRAGMA table_info(usuarios)')
+        existentes = {linha[1] for linha in cursor.fetchall()}
+        if 'permissoes' not in existentes:
+            cursor.execute(
+                "ALTER TABLE usuarios ADD COLUMN permissoes TEXT NOT NULL DEFAULT 'history'")
+
     # ----------------------------------------------------------------------
     # Autenticação e backup
     # ----------------------------------------------------------------------
@@ -347,10 +404,22 @@ class DatabaseManager:
         cursor = conn.cursor()
         try:
             cursor.execute(
-                'SELECT id, nome, email, senha_hash, papel FROM usuarios WHERE email = ?',
+                'SELECT id, nome, email, senha_hash, papel, permissoes FROM usuarios WHERE email = ?',
                 (email,))
             row = cursor.fetchone()
             return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def definir_permissoes_usuario(self, usuario_id: int, permissoes: str):
+        """Grava as abas liberadas do usuário (string separada por vírgula)."""
+        conn = self._conectar()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                'UPDATE usuarios SET permissoes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+                (permissoes, usuario_id))
+            conn.commit()
         finally:
             conn.close()
 
@@ -373,7 +442,7 @@ class DatabaseManager:
         try:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT id, nome, email, papel,
+                SELECT id, nome, email, papel, permissoes,
                        (senha_hash IS NOT NULL AND senha_hash != '') AS tem_senha,
                        created_at
                 FROM usuarios ORDER BY nome
@@ -462,34 +531,97 @@ class DatabaseManager:
         shutil.copy2(self.db_path, destino)
         return destino
 
+    # SELECT reaproveitado: traz o produto + nome/valor da embalagem (LEFT JOIN,
+    # pois embalagem_id pode ser NULL). 'p' = produtos, 'e' = embalagens.
+    _SELECT_PRODUTO = '''
+        SELECT p.id, p.nome, p.preco_kg, p.validade, p.fornecedor, p.categoria,
+               p.lote, p.fabricacao, p.observacoes, p.quantidade, p.unidade,
+               p.peso_unitario, p.embalagem_id,
+               e.nome AS embalagem_nome, e.valor AS embalagem_valor,
+               (SELECT MIN(l.validade) FROM lotes l
+                  WHERE l.produto_id = p.id AND l.validade IS NOT NULL AND l.validade != '')
+                  AS proxima_validade,
+               (SELECT COUNT(*) FROM lotes l WHERE l.produto_id = p.id) AS num_lotes
+        FROM produtos p
+        LEFT JOIN embalagens e ON e.id = p.embalagem_id
+    '''
+
     def listar_produtos(self):
-        """Retorna todos os produtos (perfil completo), em ordem alfabética."""
+        """Retorna todos os produtos (perfil completo + embalagem), em ordem alfabética."""
         conn = self._conectar()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         try:
-            cursor.execute('''
-                SELECT id, nome, preco_kg, validade, fornecedor, categoria, lote, fabricacao, observacoes,
-                       quantidade, unidade, peso_unitario
-                FROM produtos ORDER BY nome
-            ''')
+            cursor.execute(self._SELECT_PRODUTO + ' ORDER BY p.nome')
             return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()
 
     def obter_produto(self, produto_id):
-        """Retorna um único produto (perfil completo) ou None se não existir."""
+        """Retorna um único produto (perfil completo + embalagem) ou None."""
         conn = self._conectar()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         try:
-            cursor.execute('''
-                SELECT id, nome, preco_kg, validade, fornecedor, categoria, lote, fabricacao, observacoes,
-                       quantidade, unidade, peso_unitario
-                FROM produtos WHERE id = ?
-            ''', (produto_id,))
+            cursor.execute(self._SELECT_PRODUTO + ' WHERE p.id = ?', (produto_id,))
             row = cursor.fetchone()
             return dict(row) if row else None
+        finally:
+            conn.close()
+
+    # ----------------------------------------------------------------------
+    # Tipos de embalagem (nome + valor)
+    # ----------------------------------------------------------------------
+    def listar_embalagens(self):
+        """Lista os tipos de embalagem, em ordem alfabética."""
+        conn = self._conectar()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        try:
+            cursor.execute('SELECT id, nome, valor FROM embalagens ORDER BY nome')
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def criar_embalagem(self, nome: str, valor: float = 0) -> int:
+        """Cria um tipo de embalagem. Levanta ValueError se o nome já existir."""
+        conn = self._conectar()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('INSERT INTO embalagens (nome, valor) VALUES (?, ?)',
+                           (nome, valor))
+            conn.commit()
+            return cursor.lastrowid
+        except sqlite3.IntegrityError:
+            raise ValueError('Já existe uma embalagem com esse nome')
+        finally:
+            conn.close()
+
+    def atualizar_embalagem(self, embalagem_id: int, nome: str, valor: float):
+        """Atualiza nome e valor de uma embalagem."""
+        conn = self._conectar()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('UPDATE embalagens SET nome = ?, valor = ? WHERE id = ?',
+                           (nome, valor, embalagem_id))
+            conn.commit()
+            return cursor.rowcount
+        except sqlite3.IntegrityError:
+            raise ValueError('Já existe uma embalagem com esse nome')
+        finally:
+            conn.close()
+
+    def remover_embalagem(self, embalagem_id: int):
+        """Remove uma embalagem e desvincula os produtos que a usavam (viram NULL)."""
+        conn = self._conectar()
+        cursor = conn.cursor()
+        try:
+            # Desvincula antes de apagar, para não deixar produtos apontando para o vazio
+            cursor.execute('UPDATE produtos SET embalagem_id = NULL WHERE embalagem_id = ?',
+                           (embalagem_id,))
+            cursor.execute('DELETE FROM embalagens WHERE id = ?', (embalagem_id,))
+            conn.commit()
+            return cursor.rowcount
         finally:
             conn.close()
 
@@ -518,17 +650,20 @@ class DatabaseManager:
         """Atualiza os campos informados de um produto.
         Se o preço mudar, registra a alteração em historico_precos automaticamente."""
         # Mantém só os campos permitidos e realmente enviados (não-None)
+        # Mantém só os campos permitidos. Normalmente descarta None (não mexe no campo),
+        # MAS embalagem_id=None é intencional: significa "remover a embalagem".
         campos = {k: v for k, v in campos.items()
-                  if k in self.CAMPOS_EDITAVEIS_PRODUTO and v is not None}
+                  if k in self.CAMPOS_EDITAVEIS_PRODUTO and (v is not None or k == 'embalagem_id')}
         if not campos:
             return 0
 
         conn = self._conectar()
         cursor = conn.cursor()
         try:
-            # Campos rastreados no histórico e o rótulo salvo no log (coluna -> nome)
-            RASTREAR = {'preco_kg': 'preco', 'validade': 'validade',
-                        'lote': 'lote', 'fabricacao': 'fabricacao'}
+            # Campos rastreados no histórico e o rótulo salvo no log (coluna -> nome).
+            # lote/validade/fabricação saíram daqui: agora são gerenciados por LOTES.
+            RASTREAR = {'preco_kg': 'preco', 'fornecedor': 'fornecedor',
+                        'categoria': 'categoria', 'observacoes': 'observacoes'}
             rastreados = [c for c in RASTREAR if c in campos]
 
             # Pega os valores antigos desses campos ANTES do UPDATE, para comparar
@@ -569,16 +704,99 @@ class DatabaseManager:
             conn.close()
 
     def remover_produto(self, produto_id):
-        """Remove um produto e o seu histórico de preços."""
+        """Remove um produto e tudo ligado a ele (histórico e lotes)."""
         conn = self._conectar()
         cursor = conn.cursor()
         try:
-            cursor.execute('DELETE FROM historico_precos WHERE produto_id = ?', (produto_id,))
-            cursor.execute('DELETE FROM historico_validades WHERE produto_id = ?', (produto_id,))
             cursor.execute('DELETE FROM historico_produto WHERE produto_id = ?', (produto_id,))
+            cursor.execute('DELETE FROM lotes WHERE produto_id = ?', (produto_id,))
             cursor.execute('DELETE FROM produtos WHERE id = ?', (produto_id,))
             conn.commit()
             return cursor.rowcount
+        finally:
+            conn.close()
+
+    # ----------------------------------------------------------------------
+    # Lotes (partidas) de um produto: cada um com validade/fabricação/quantidade
+    # ----------------------------------------------------------------------
+    def listar_lotes(self, produto_id):
+        """Lista os lotes de um produto, ordenados pela validade mais próxima primeiro
+        (lotes sem validade vão para o fim)."""
+        conn = self._conectar()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                SELECT id, produto_id, codigo, fabricacao, validade, quantidade, created_at
+                FROM lotes WHERE produto_id = ?
+                ORDER BY (validade IS NULL OR validade = ''), validade ASC, id DESC
+            ''', (produto_id,))
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def obter_lote(self, lote_id):
+        """Retorna um lote (ou None). Útil para saber a que produto ele pertence."""
+        conn = self._conectar()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        try:
+            cursor.execute('SELECT * FROM lotes WHERE id = ?', (lote_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def criar_lote(self, produto_id, codigo=None, fabricacao=None, validade=None, quantidade=None):
+        """Cria um novo lote para um produto."""
+        conn = self._conectar()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                'INSERT INTO lotes (produto_id, codigo, fabricacao, validade, quantidade) '
+                'VALUES (?, ?, ?, ?, ?)', (produto_id, codigo, fabricacao, validade, quantidade))
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            conn.close()
+
+    def atualizar_lote(self, lote_id, codigo=None, fabricacao=None, validade=None, quantidade=None):
+        """Atualiza os campos de um lote."""
+        conn = self._conectar()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                'UPDATE lotes SET codigo = ?, fabricacao = ?, validade = ?, quantidade = ? WHERE id = ?',
+                (codigo, fabricacao, validade, quantidade, lote_id))
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            conn.close()
+
+    def remover_lote(self, lote_id):
+        """Remove um lote."""
+        conn = self._conectar()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('DELETE FROM lotes WHERE id = ?', (lote_id,))
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            conn.close()
+
+    def adicionar_historico_produto(self, produto_id, campo, valor_anterior, valor_novo):
+        """Acrescenta uma linha no histórico unificado do produto. Usado para registrar
+        eventos que não passam pelo UPDATE de produtos — como adicionar/remover lote."""
+        conn = self._conectar()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                INSERT INTO historico_produto (produto_id, campo, valor_anterior, valor_novo)
+                VALUES (?, ?, ?, ?)
+            ''', (produto_id, campo,
+                  None if valor_anterior is None else str(valor_anterior),
+                  None if valor_novo is None else str(valor_novo)))
+            conn.commit()
         finally:
             conn.close()
 

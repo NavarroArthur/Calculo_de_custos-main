@@ -121,6 +121,7 @@ def proteger_api():
         # Deixa o usuário disponível para o resto da requisição (via flask.g)
         g.usuario_id = dados.get('uid')
         g.papel = dados.get('papel', 'leitura')
+        g.permissoes = dados.get('permissoes') or []
 
 
 def exige_admin(f):
@@ -164,6 +165,40 @@ def _paginacao(limite_padrao=100, limite_max=500):
     return limite, offset
 
 
+# Abas que podem ser liberadas a um usuário comum. A Calculadora é sempre liberada
+# (base); Configurações, Logs e Usuários são exclusivas do admin (não entram aqui).
+PERMISSOES_VALIDAS = {'history', 'produtos'}
+
+
+def _sanitizar_permissoes(valor):
+    """Recebe uma lista OU string 'a,b' e devolve só as permissões VÁLIDAS (whitelist).
+    Nunca confia no que o cliente manda — ignora qualquer chave desconhecida."""
+    if isinstance(valor, str):
+        itens = [v.strip() for v in valor.split(',')]
+    elif isinstance(valor, (list, tuple)):
+        itens = [str(v).strip() for v in valor]
+    else:
+        itens = []
+    return sorted({v for v in itens if v in PERMISSOES_VALIDAS})
+
+
+def exige_permissao(permissao):
+    """AUTORIZAÇÃO granular: deixa passar quem é admin OU tem a permissão pedida.
+    Diferente de exige_admin, isto libera abas específicas (ex.: 'produtos') a
+    usuários comuns, conforme o que o admin configurou."""
+    def decorador(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            if getattr(g, 'papel', 'leitura') == 'admin' or permissao in getattr(g, 'permissoes', []):
+                return f(*args, **kwargs)
+            ip, ua = _req_ip_ua()
+            db.registrar_log(getattr(g, 'usuario_id', None), 'acesso_negado',
+                             f'{request.method} {request.path} (falta permissão: {permissao})', ip, ua)
+            return jsonify({'error': 'Acesso negado'}), 403
+        return wrapper
+    return decorador
+
+
 @app.after_request
 def cabecalhos_seguranca(resposta):
     """Adiciona cabeçalhos de segurança em TODA resposta da API (defesa em camadas).
@@ -201,10 +236,13 @@ def login():
 
         db.limpar_tentativas_login(ip)           # login ok: zera o contador do IP
         db.registrar_log(usuario['id'], 'login', 'Login bem-sucedido', ip, ua)
-        # O papel entra no token para o servidor saber o que o usuário pode fazer
-        token = serializer.dumps({'uid': usuario['id'], 'papel': usuario.get('papel', 'leitura')})
-        return jsonify({'success': True, 'token': token,
-                        'nome': usuario['nome'], 'papel': usuario.get('papel', 'leitura')})
+        # Papel e permissões entram no token para o servidor saber o que o usuário pode fazer.
+        # (Mudanças de permissão só valem no próximo login, pois ficam no token.)
+        papel = usuario.get('papel', 'leitura')
+        permissoes = _sanitizar_permissoes(usuario.get('permissoes') or '')
+        token = serializer.dumps({'uid': usuario['id'], 'papel': papel, 'permissoes': permissoes})
+        return jsonify({'success': True, 'token': token, 'nome': usuario['nome'],
+                        'papel': papel, 'permissoes': permissoes})
     except Exception as e:
         log_erro('Erro no login', e)
         return jsonify({'error': 'Erro no login'}), 500
@@ -285,6 +323,9 @@ def criar_usuario():
         if senha and len(senha) < 6:
             return jsonify({'error': 'A senha deve ter pelo menos 6 caracteres'}), 400
 
+        # Permissões (abas) só valem para usuário comum; admin já tem tudo
+        permissoes = _sanitizar_permissoes(data.get('permissoes'))
+
         usuario_id = db.criar_usuario(
             nome=data['nome'],
             email=data.get('email'),
@@ -292,13 +333,14 @@ def criar_usuario():
             telefone=data.get('telefone')
         )
         db.definir_papel_usuario(usuario_id, papel)
+        db.definir_permissoes_usuario(usuario_id, ','.join(permissoes))
         if senha:
             # Guarda só o HASH da senha, nunca o texto puro
             db.definir_senha_usuario(usuario_id, generate_password_hash(senha))
 
         ip, ua = _req_ip_ua()
         db.registrar_log(g.usuario_id, 'usuario_criado',
-                         f"{data['nome']} (papel: {papel})", ip, ua)
+                         f"{data['nome']} (papel: {papel}, abas: {','.join(permissoes) or '-'})", ip, ua)
         return jsonify({
             'success': True,
             'message': 'Usuário criado com sucesso',
@@ -310,6 +352,37 @@ def criar_usuario():
     except Exception as e:
         log_erro('Erro ao criar usuário', e)
         return jsonify({'error': 'Erro interno'}), 500
+
+@app.route('/api/usuarios/<int:usuario_id>', methods=['PUT'])
+@exige_admin
+def atualizar_usuario(usuario_id):
+    """Edita papel, permissões (abas) e, opcionalmente, a senha de um usuário."""
+    try:
+        data = request.get_json(silent=True) or {}
+        papel = data.get('papel')
+        if papel is not None and papel not in ('admin', 'leitura'):
+            return jsonify({'error': "Papel deve ser 'admin' ou 'leitura'"}), 400
+
+        # Trava anti-lockout: o admin não pode remover o próprio acesso de admin
+        # (senão ficaria trancado para fora da administração).
+        if usuario_id == g.usuario_id and papel == 'leitura':
+            return jsonify({'error': 'Você não pode remover o seu próprio acesso de administrador'}), 400
+
+        if papel is not None:
+            db.definir_papel_usuario(usuario_id, papel)
+        if 'permissoes' in data:
+            db.definir_permissoes_usuario(usuario_id, ','.join(_sanitizar_permissoes(data['permissoes'])))
+        if data.get('senha'):
+            if len(data['senha']) < 6:
+                return jsonify({'error': 'A senha deve ter pelo menos 6 caracteres'}), 400
+            db.definir_senha_usuario(usuario_id, generate_password_hash(data['senha']))
+
+        ip, ua = _req_ip_ua()
+        db.registrar_log(g.usuario_id, 'usuario_editado', f'usuário {usuario_id} atualizado', ip, ua)
+        return jsonify({'success': True})
+    except Exception as e:
+        log_erro('Erro ao atualizar usuário', e)
+        return jsonify({'error': 'Erro ao atualizar usuário'}), 500
 
 @app.route('/api/calculos', methods=['POST'])
 def salvar_calculo():
@@ -524,6 +597,66 @@ def listar_produtos():
         app.logger.error(f'Erro ao listar produtos: {e}')
         return jsonify({'error': 'Erro ao listar produtos'}), 500
 
+# ---------------------------------------------------------------------------
+# Tipos de embalagem (nome + valor). Ler: qualquer usuário logado (para o select
+# do perfil). Criar/editar/apagar: quem tem a permissão 'produtos'.
+# ---------------------------------------------------------------------------
+@app.route('/api/embalagens', methods=['GET'])
+def listar_embalagens():
+    try:
+        return jsonify({'success': True, 'embalagens': db.listar_embalagens()})
+    except Exception as e:
+        log_erro('Erro ao listar embalagens', e)
+        return jsonify({'error': 'Erro ao listar embalagens'}), 500
+
+@app.route('/api/embalagens', methods=['POST'])
+@exige_permissao('produtos')
+def criar_embalagem():
+    try:
+        data = request.get_json(silent=True) or {}
+        nome = (data.get('nome') or '').strip()
+        if not nome:
+            return jsonify({'error': 'Nome da embalagem é obrigatório'}), 400
+        valor = float(data.get('valor') or 0)
+        if valor < 0:
+            return jsonify({'error': 'O valor não pode ser negativo'}), 400
+        eid = db.criar_embalagem(nome, valor)
+        return jsonify({'success': True, 'embalagem_id': eid}), 201
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        log_erro('Erro ao criar embalagem', e)
+        return jsonify({'error': 'Erro ao criar embalagem'}), 500
+
+@app.route('/api/embalagens/<int:embalagem_id>', methods=['PUT'])
+@exige_permissao('produtos')
+def atualizar_embalagem(embalagem_id):
+    try:
+        data = request.get_json(silent=True) or {}
+        nome = (data.get('nome') or '').strip()
+        if not nome:
+            return jsonify({'error': 'Nome da embalagem é obrigatório'}), 400
+        valor = float(data.get('valor') or 0)
+        if valor < 0:
+            return jsonify({'error': 'O valor não pode ser negativo'}), 400
+        db.atualizar_embalagem(embalagem_id, nome, valor)
+        return jsonify({'success': True})
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        log_erro('Erro ao atualizar embalagem', e)
+        return jsonify({'error': 'Erro ao atualizar embalagem'}), 500
+
+@app.route('/api/embalagens/<int:embalagem_id>', methods=['DELETE'])
+@exige_permissao('produtos')
+def remover_embalagem(embalagem_id):
+    try:
+        db.remover_embalagem(embalagem_id)
+        return jsonify({'success': True})
+    except Exception as e:
+        log_erro('Erro ao remover embalagem', e)
+        return jsonify({'error': 'Erro ao remover embalagem'}), 500
+
 @app.route('/api/produtos/<int:produto_id>', methods=['GET'])
 def obter_produto(produto_id):
     """Retorna um único produto (perfil completo)."""
@@ -545,8 +678,72 @@ def historico_produto(produto_id):
         app.logger.error(f'Erro ao obter histórico do produto: {e}')
         return jsonify({'error': 'Erro ao obter histórico do produto'}), 500
 
+# ---------------------------------------------------------------------------
+# Lotes (partidas) de um produto. Ler: qualquer logado. Criar/editar/apagar:
+# quem tem a permissão 'produtos'. Cada evento de lote entra no histórico do produto.
+# ---------------------------------------------------------------------------
+@app.route('/api/produtos/<int:produto_id>/lotes', methods=['GET'])
+def listar_lotes(produto_id):
+    try:
+        return jsonify({'success': True, 'lotes': db.listar_lotes(produto_id)})
+    except Exception as e:
+        log_erro('Erro ao listar lotes', e)
+        return jsonify({'error': 'Erro ao listar lotes'}), 500
+
+@app.route('/api/produtos/<int:produto_id>/lotes', methods=['POST'])
+@exige_permissao('produtos')
+def criar_lote(produto_id):
+    try:
+        data = request.get_json(silent=True) or {}
+        codigo = (data.get('codigo') or '').strip() or None
+        fabricacao = data.get('fabricacao') or None
+        validade = data.get('validade') or None
+        quantidade = float(data['quantidade']) if data.get('quantidade') not in (None, '') else None
+        if not (codigo or validade or fabricacao):
+            return jsonify({'error': 'Informe ao menos código, validade ou fabricação'}), 400
+        lote_id = db.criar_lote(produto_id, codigo, fabricacao, validade, quantidade)
+        db.adicionar_historico_produto(produto_id, 'lote', None,
+                                       f'{codigo or "lote"} (val: {validade or "—"})')
+        return jsonify({'success': True, 'lote_id': lote_id}), 201
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Quantidade deve ser um número'}), 400
+    except Exception as e:
+        log_erro('Erro ao criar lote', e)
+        return jsonify({'error': 'Erro ao criar lote'}), 500
+
+@app.route('/api/lotes/<int:lote_id>', methods=['PUT'])
+@exige_permissao('produtos')
+def atualizar_lote(lote_id):
+    try:
+        data = request.get_json(silent=True) or {}
+        codigo = (data.get('codigo') or '').strip() or None
+        fabricacao = data.get('fabricacao') or None
+        validade = data.get('validade') or None
+        quantidade = float(data['quantidade']) if data.get('quantidade') not in (None, '') else None
+        db.atualizar_lote(lote_id, codigo, fabricacao, validade, quantidade)
+        return jsonify({'success': True})
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Quantidade deve ser um número'}), 400
+    except Exception as e:
+        log_erro('Erro ao atualizar lote', e)
+        return jsonify({'error': 'Erro ao atualizar lote'}), 500
+
+@app.route('/api/lotes/<int:lote_id>', methods=['DELETE'])
+@exige_permissao('produtos')
+def remover_lote(lote_id):
+    try:
+        lote = db.obter_lote(lote_id)
+        db.remover_lote(lote_id)
+        if lote:
+            db.adicionar_historico_produto(lote['produto_id'], 'lote',
+                                           f'{lote.get("codigo") or "lote"} (val: {lote.get("validade") or "—"})', 'removido')
+        return jsonify({'success': True})
+    except Exception as e:
+        log_erro('Erro ao remover lote', e)
+        return jsonify({'error': 'Erro ao remover lote'}), 500
+
 @app.route('/api/produtos', methods=['POST'])
-@exige_admin
+@exige_permissao('produtos')
 def criar_produto():
     """Cria um novo produto com o perfil completo."""
     try:
@@ -578,7 +775,7 @@ def criar_produto():
         return jsonify({'error': 'Erro ao criar produto'}), 500
 
 @app.route('/api/produtos/<int:produto_id>', methods=['PUT'])
-@exige_admin
+@exige_permissao('produtos')
 def atualizar_produto(produto_id):
     """Atualiza os campos informados de um produto (perfil e/ou preço)."""
     try:
@@ -594,6 +791,10 @@ def atualizar_produto(produto_id):
                       'quantidade', 'unidade', 'peso_unitario'):
             if chave in data:
                 campos[chave] = data.get(chave)
+        if 'embalagem_id' in data:
+            eid = data.get('embalagem_id')
+            # vazio/0 => None (nenhuma embalagem); senão, o id como inteiro
+            campos['embalagem_id'] = int(eid) if eid not in (None, '', 0, '0') else None
         db.atualizar_produto(produto_id, **campos)
         return jsonify({'success': True})
     except ValueError as e:
@@ -603,7 +804,7 @@ def atualizar_produto(produto_id):
         return jsonify({'error': 'Erro ao atualizar produto'}), 500
 
 @app.route('/api/produtos/<int:produto_id>', methods=['DELETE'])
-@exige_admin
+@exige_permissao('produtos')
 def remover_produto(produto_id):
     """Remove um produto e seu histórico."""
     try:

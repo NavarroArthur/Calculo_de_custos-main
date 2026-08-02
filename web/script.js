@@ -13,6 +13,8 @@ const API_BASE_URL = rodandoLocal ? 'http://localhost:5000/api' : PRODUCTION_API
 let PRECOS = { GELO: 8.5, PAPELAO: 7.3, FITA: 0.34 };
 // Lista de produtos vinda do banco (id, nome, preco_kg)
 let PRODUTOS = [];
+// Tipos de embalagem cadastrados (id, nome, valor)
+let EMBALAGENS = [];
 
 // ---------------------------------------------------------------------------
 // AUTENTICACAO: intercepta as chamadas da API para anexar o token e tratar 401
@@ -153,6 +155,12 @@ function inicializarEventos() {
     // Usuarios: criar novo
     const formUsuario = document.getElementById('formNovoUsuario');
     if (formUsuario) formUsuario.addEventListener('submit', criarUsuarioAdmin);
+    // Embalagens: adicionar nova
+    const formEmb = document.getElementById('formNovaEmbalagem');
+    if (formEmb) formEmb.addEventListener('submit', adicionarEmbalagem);
+    // Lotes: adicionar novo (form dentro do modal de perfil)
+    const formLote = document.getElementById('formNovoLote');
+    if (formLote) formLote.addEventListener('submit', adicionarLote);
     const btnLogout = document.getElementById('btnLogout');
     if (btnLogout) btnLogout.addEventListener('click', logout);
     const btnBaixarBackup = document.getElementById('btnBaixarBackup');
@@ -451,14 +459,23 @@ function mostrarToast(mensagem, tipo = 'success') {
 }
 
 // Inicialização do sistema
-// Esconde os elementos marcados com [data-admin] para quem NÃO é admin.
+// Ajusta a interface conforme o papel e as permissões (abas) do usuário.
 // IMPORTANTE: isto é só UX (esconder botões). A segurança de verdade está no
-// servidor (@exige_admin) — o front nunca é a fonte da verdade de permissão,
-// porque o usuário pode alterar o HTML/JS no próprio navegador.
+// servidor (@exige_admin / @exige_permissao) — o front nunca é a fonte da verdade
+// de permissão, porque o usuário pode alterar o HTML/JS no próprio navegador.
 function aplicarPermissoesUI() {
     const ehAdmin = localStorage.getItem('papel') === 'admin';
+    let permissoes = [];
+    try { permissoes = JSON.parse(localStorage.getItem('permissoes') || '[]'); } catch (e) { permissoes = []; }
+    // Elementos SÓ-admin (Configurações, Logs, Usuários)
     document.querySelectorAll('[data-admin]').forEach(el => {
         el.style.display = ehAdmin ? '' : 'none';
+    });
+    // Elementos por permissão de aba (ex.: Histórico, Produtos): admin vê tudo;
+    // usuário comum vê só o que estiver na lista de permissões dele.
+    document.querySelectorAll('[data-perm]').forEach(el => {
+        const perm = el.getAttribute('data-perm');
+        el.style.display = (ehAdmin || permissoes.includes(perm)) ? '' : 'none';
     });
 }
 
@@ -634,6 +651,7 @@ async function fazerLogin(event) {
         if (!resp.ok) throw new Error(data.error || 'E-mail ou senha inválidos');
         localStorage.setItem('token', data.token);
         localStorage.setItem('papel', data.papel || 'leitura');  // guarda o papel p/ a UI
+        localStorage.setItem('permissoes', JSON.stringify(data.permissoes || []));  // abas liberadas
         document.getElementById('login_senha').value = '';
         esconderLogin();
         switchTab('calculator');   // ao logar, sempre cai na Calculadora
@@ -651,6 +669,7 @@ async function fazerLogin(event) {
 function logout() {
     localStorage.removeItem('token');
     localStorage.removeItem('papel');
+    localStorage.removeItem('permissoes');
     mostrarLogin();
     mostrarToast('Você saiu.', 'success');
 }
@@ -706,10 +725,113 @@ async function carregarProdutos() {
             PRODUTOS = data.produtos;
             popularSelectProdutos();
             renderListaProdutos();
+            popularDatalistsProduto();
+            await carregarEmbalagens();
         }
     } catch (error) {
         console.warn('⚠️ Erro ao carregar produtos (mantendo lista fixa):', error);
     }
+}
+
+// --- Tipos de embalagem ----------------------------------------------------
+async function carregarEmbalagens() {
+    try {
+        const resp = await fetch(`${API_BASE_URL}/embalagens`);
+        if (!resp.ok) throw new Error('Falha');
+        const data = await resp.json();
+        EMBALAGENS = data.embalagens || [];
+        renderEmbalagens();
+        popularSelectEmbalagem();
+    } catch (e) {
+        console.warn('⚠️ Erro ao carregar embalagens:', e);
+    }
+}
+
+// Preenche o <select> de tipo de embalagem no perfil do produto
+function popularSelectEmbalagem() {
+    const sel = document.getElementById('perfil_embalagem');
+    if (!sel) return;
+    const atual = sel.value;
+    sel.innerHTML = '<option value="">— Nenhuma —</option>' +
+        EMBALAGENS.map(e =>
+            `<option value="${e.id}">${esc(e.nome)} (R$ ${Number(e.valor).toFixed(2)})</option>`).join('');
+    if (atual) sel.value = atual;
+}
+
+// Preenche as datalists de categoria e fornecedor com os valores JÁ cadastrados
+function popularDatalistsProduto() {
+    const cats = [...new Set(PRODUTOS.map(p => (p.categoria || '').trim()).filter(Boolean))].sort();
+    const forns = [...new Set(PRODUTOS.map(p => (p.fornecedor || '').trim()).filter(Boolean))].sort();
+    const dcat = document.getElementById('listaCategorias');
+    const dforn = document.getElementById('listaFornecedores');
+    if (dcat) dcat.innerHTML = cats.map(c => `<option value="${esc(c)}"></option>`).join('');
+    if (dforn) dforn.innerHTML = forns.map(f => `<option value="${esc(f)}"></option>`).join('');
+}
+
+// Renderiza a lista editável de embalagens (nome + valor, com Salvar e Remover)
+function renderEmbalagens() {
+    const cont = document.getElementById('listaEmbalagens');
+    if (!cont) return;
+    if (!EMBALAGENS.length) {
+        cont.innerHTML = '<p class="produtos-hint">Nenhuma embalagem cadastrada ainda.</p>';
+        return;
+    }
+    cont.innerHTML = EMBALAGENS.map(e => `
+        <div class="embalagem-item" data-id="${e.id}">
+            <input type="text" class="emb-nome" value="${esc(e.nome)}" aria-label="Nome da embalagem">
+            <input type="number" class="emb-valor" value="${e.valor}" step="0.01" min="0" inputmode="decimal" aria-label="Valor">
+            <button type="button" class="btn-produto btn-salvar" onclick="salvarEmbalagem(${e.id})">
+                <i class="fas fa-save" aria-hidden="true"></i> Salvar
+            </button>
+            <button type="button" class="btn-produto btn-excluir" onclick="removerEmbalagem(${e.id})">
+                <i class="fas fa-trash" aria-hidden="true"></i>
+            </button>
+        </div>`).join('');
+}
+
+async function adicionarEmbalagem(event) {
+    event.preventDefault();
+    const nome = document.getElementById('novaEmbalagemNome').value.trim();
+    const valor = parseFloat(document.getElementById('novaEmbalagemValor').value) || 0;
+    if (!nome) { mostrarToast('Informe o nome da embalagem.', 'warning'); return; }
+    try {
+        const resp = await fetch(`${API_BASE_URL}/embalagens`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nome, valor })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.error || 'Falha ao adicionar');
+        document.getElementById('formNovaEmbalagem').reset();
+        mostrarToast('Embalagem adicionada!', 'success');
+        carregarEmbalagens();
+    } catch (e) { mostrarToast(e.message, 'error'); }
+}
+
+async function salvarEmbalagem(id) {
+    const row = document.querySelector(`.embalagem-item[data-id="${id}"]`);
+    if (!row) return;
+    const nome = row.querySelector('.emb-nome').value.trim();
+    const valor = parseFloat(row.querySelector('.emb-valor').value) || 0;
+    try {
+        const resp = await fetch(`${API_BASE_URL}/embalagens/${id}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nome, valor })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.error || 'Falha ao salvar');
+        mostrarToast('Embalagem salva!', 'success');
+        carregarEmbalagens();
+    } catch (e) { mostrarToast(e.message, 'error'); }
+}
+
+async function removerEmbalagem(id) {
+    if (!confirm('Remover esta embalagem? Os produtos que a usam ficarão sem embalagem.')) return;
+    try {
+        const resp = await fetch(`${API_BASE_URL}/embalagens/${id}`, { method: 'DELETE' });
+        if (!resp.ok) throw new Error('Falha ao remover');
+        mostrarToast('Embalagem removida.', 'success');
+        carregarEmbalagens();
+    } catch (e) { mostrarToast('Não foi possível remover.', 'error'); }
 }
 
 // Reconstroi as opcoes do select de produtos a partir do banco
@@ -752,18 +874,26 @@ function renderListaProdutos() {
         return;
     }
 
-    container.innerHTML = lista.map(p => `
+    container.innerHTML = lista.map(p => {
+        // Alerta de validade: usa a validade mais próxima entre os lotes do produto
+        let alerta = '';
+        if (p.proxima_validade) {
+            const st = statusLote(p.proxima_validade);
+            if (st.cor !== 'ok') alerta = `<span class="log-badge ${st.cor}" title="Validade mais próxima">${st.texto}</span>`;
+        }
+        return `
         <div class="produto-item" data-id="${p.id}">
             <input type="text" class="produto-nome" value="${esc(p.nome)}" aria-label="Nome do produto">
             <input type="number" class="produto-preco" value="${p.preco_kg}" step="0.01" min="0" inputmode="decimal" aria-label="Preço por Kg">
+            ${alerta}
             <button type="button" class="btn-produto btn-salvar" onclick="salvarProduto(${p.id})">
                 <i class="fas fa-save" aria-hidden="true"></i> Salvar
             </button>
             <button type="button" class="btn-produto btn-perfil" onclick="abrirPerfilProduto(${p.id})">
                 <i class="fas fa-id-card" aria-hidden="true"></i> Perfil
             </button>
-        </div>
-    `).join('');
+        </div>`;
+    }).join('');
 }
 
 // Salva (PUT) o nome e o preco de um produto ja existente
@@ -848,17 +978,19 @@ async function abrirPerfilProduto(id) {
         document.getElementById('perfil_nome').value = produto.nome || '';
         document.getElementById('perfil_preco').value = produto.preco_kg ?? '';
         document.getElementById('perfil_categoria').value = produto.categoria || '';
-        document.getElementById('perfil_validade').value = produto.validade || '';
         document.getElementById('perfil_fornecedor').value = produto.fornecedor || '';
-        document.getElementById('perfil_lote').value = produto.lote || '';
-        document.getElementById('perfil_fabricacao').value = produto.fabricacao || '';
         document.getElementById('perfil_observacoes').value = produto.observacoes || '';
         // Embalagem (quantidade + unidade + peso por unidade) e o total calculado
         document.getElementById('perfil_quantidade').value = produto.quantidade ?? '';
         document.getElementById('perfil_unidade').value = produto.unidade || '';
         document.getElementById('perfil_peso_unitario').value = produto.peso_unitario ?? '';
+        // Datalists de categoria/fornecedor e o select de tipo de embalagem
+        popularDatalistsProduto();
+        popularSelectEmbalagem();
+        document.getElementById('perfil_embalagem').value = produto.embalagem_id || '';
         calcPesoTotalPerfil();
         renderHistorico(historico);
+        carregarLotesPerfil(id);   // carrega os lotes deste produto
 
         document.getElementById('produtoModal').classList.remove('hidden');
     } catch (error) {
@@ -871,9 +1003,106 @@ function fecharModalProduto() {
     perfilAtualId = null;
 }
 
+// --- Lotes do produto ------------------------------------------------------
+// Status pela validade: vencido / vence em Xd (<=30) / válido / sem validade
+function statusLote(validade) {
+    if (!validade) return { texto: 'sem validade', cor: 'neutro' };
+    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    const val = new Date(validade + 'T00:00:00');
+    const dias = Math.round((val - hoje) / 86400000);
+    if (dias < 0) return { texto: 'vencido', cor: 'erro' };
+    if (dias <= 30) return { texto: `vence em ${dias}d`, cor: 'aviso' };
+    return { texto: 'válido', cor: 'ok' };
+}
+
+async function carregarLotesPerfil(produtoId) {
+    const cont = document.getElementById('listaLotes');
+    if (!cont) return;
+    cont.innerHTML = '<p class="produtos-hint">Carregando...</p>';
+    try {
+        const resp = await fetch(`${API_BASE_URL}/produtos/${produtoId}/lotes`);
+        if (!resp.ok) throw new Error('Falha');
+        renderLotes((await resp.json()).lotes || []);
+    } catch (e) {
+        cont.innerHTML = '<p class="produtos-hint">Não foi possível carregar os lotes.</p>';
+    }
+}
+
+function renderLotes(lotes) {
+    const cont = document.getElementById('listaLotes');
+    if (!lotes.length) { cont.innerHTML = '<p class="produtos-hint">Nenhum lote cadastrado.</p>'; return; }
+    cont.innerHTML = lotes.map(l => {
+        const st = statusLote(l.validade);
+        return `
+        <div class="lote-item" data-id="${l.id}">
+            <span class="log-badge ${st.cor}">${st.texto}</span>
+            <input type="text" class="lote-cod" value="${esc(l.codigo || '')}" placeholder="Código" aria-label="Código do lote">
+            <label class="lote-campo">Fab. <input type="date" class="lote-fab" value="${l.fabricacao || ''}"></label>
+            <label class="lote-campo">Val. <input type="date" class="lote-val" value="${l.validade || ''}"></label>
+            <input type="number" class="lote-qtd" value="${l.quantidade ?? ''}" step="0.01" min="0" inputmode="decimal" placeholder="Kg" aria-label="Quantidade">
+            <button type="button" class="btn-produto btn-salvar" onclick="salvarLote(${l.id})"><i class="fas fa-save" aria-hidden="true"></i></button>
+            <button type="button" class="btn-produto btn-excluir" onclick="removerLote(${l.id})"><i class="fas fa-trash" aria-hidden="true"></i></button>
+        </div>`;
+    }).join('');
+}
+
+async function adicionarLote(event) {
+    event.preventDefault();
+    if (!perfilAtualId) return;
+    const corpo = {
+        codigo: document.getElementById('loteCodigo').value.trim(),
+        fabricacao: document.getElementById('loteFabricacao').value,
+        validade: document.getElementById('loteValidade').value,
+        quantidade: document.getElementById('loteQuantidade').value
+    };
+    try {
+        const resp = await fetch(`${API_BASE_URL}/produtos/${perfilAtualId}/lotes`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corpo)
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.error || 'Falha ao adicionar lote');
+        document.getElementById('formNovoLote').reset();
+        mostrarToast('Lote adicionado!', 'success');
+        carregarLotesPerfil(perfilAtualId);
+        carregarProdutos();   // atualiza os alertas de validade na lista
+    } catch (e) { mostrarToast(e.message, 'error'); }
+}
+
+async function salvarLote(id) {
+    const row = document.querySelector(`.lote-item[data-id="${id}"]`);
+    if (!row) return;
+    const corpo = {
+        codigo: row.querySelector('.lote-cod').value.trim(),
+        fabricacao: row.querySelector('.lote-fab').value,
+        validade: row.querySelector('.lote-val').value,
+        quantidade: row.querySelector('.lote-qtd').value
+    };
+    try {
+        const resp = await fetch(`${API_BASE_URL}/lotes/${id}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corpo)
+        });
+        if (!resp.ok) throw new Error('Falha');
+        mostrarToast('Lote salvo!', 'success');
+        carregarLotesPerfil(perfilAtualId);
+        carregarProdutos();
+    } catch (e) { mostrarToast('Não foi possível salvar o lote.', 'error'); }
+}
+
+async function removerLote(id) {
+    if (!confirm('Remover este lote?')) return;
+    try {
+        const resp = await fetch(`${API_BASE_URL}/lotes/${id}`, { method: 'DELETE' });
+        if (!resp.ok) throw new Error('Falha');
+        mostrarToast('Lote removido.', 'success');
+        carregarLotesPerfil(perfilAtualId);
+        carregarProdutos();
+    } catch (e) { mostrarToast('Não foi possível remover.', 'error'); }
+}
+
 // Monta a linha do tempo de precos (do mais recente ao mais antigo)
 // Rotulos amigaveis de cada campo do historico
-const ROTULOS_HISTORICO = { preco: 'Preço', validade: 'Validade', lote: 'Lote', fabricacao: 'Fabricação' };
+const ROTULOS_HISTORICO = { preco: 'Preço', validade: 'Validade', lote: 'Lote',
+    fabricacao: 'Fabricação', fornecedor: 'Fornecedor', categoria: 'Categoria', observacoes: 'Observações' };
 
 // Formata o valor conforme o tipo do campo (dinheiro, data ou texto)
 function formatarValorHistorico(campo, valor) {
@@ -942,15 +1171,14 @@ async function salvarPerfilProduto() {
         nome: document.getElementById('perfil_nome').value.trim(),
         preco_kg: parseFloat(document.getElementById('perfil_preco').value) || 0,
         categoria: document.getElementById('perfil_categoria').value.trim(),
-        validade: document.getElementById('perfil_validade').value,
         fornecedor: document.getElementById('perfil_fornecedor').value.trim(),
-        lote: document.getElementById('perfil_lote').value.trim(),
-        fabricacao: document.getElementById('perfil_fabricacao').value,
         observacoes: document.getElementById('perfil_observacoes').value.trim(),
         // Embalagem: numeros vazios viram null (nao sobrescrevem); unidade vazia ('') limpa
         quantidade: parseFloat(document.getElementById('perfil_quantidade').value) || null,
         unidade: document.getElementById('perfil_unidade').value || '',
-        peso_unitario: parseFloat(document.getElementById('perfil_peso_unitario').value) || null
+        peso_unitario: parseFloat(document.getElementById('perfil_peso_unitario').value) || null,
+        // Tipo de embalagem escolhido ('' = nenhuma)
+        embalagem_id: document.getElementById('perfil_embalagem').value || ''
     };
     try {
         const response = await fetch(`${API_BASE_URL}/produtos/${perfilAtualId}`, {
@@ -1171,21 +1399,24 @@ function renderUsuarios(usuarios) {
         return;
     }
     lista.innerHTML = usuarios.map(function (u) {
-        const papelTxt = u.papel === 'admin' ? 'Admin' : 'Leitura';
-        const papelCor = u.papel === 'admin' ? 'erro' : 'neutro';
-        // tem_senha vem 1/0 do SQLite; sem senha o usuário não consegue logar
-        const acesso = u.tem_senha
-            ? ''
-            : ' <span class="log-badge aviso">sem senha (não loga)</span>';
+        const perms = (u.permissoes || '').split(',').map(s => s.trim());
+        const marc = p => perms.includes(p) ? 'checked' : '';
+        const semSenha = u.tem_senha ? '' : ' <span class="log-badge aviso">sem senha (não loga)</span>';
+        // Admin: acesso total (sem edição de abas aqui). Comum: escolhe as abas.
+        const controles = (u.papel === 'admin')
+            ? `<span class="log-badge erro">Admin — acesso total</span>${semSenha}`
+            : `<label><input type="checkbox" class="uperm" value="history" ${marc('history')}> Histórico</label>
+               <label><input type="checkbox" class="uperm" value="produtos" ${marc('produtos')}> Produtos</label>
+               <button type="button" class="btn-produto btn-salvar" onclick="salvarPermissoesUsuario(${u.id})">
+                   <i class="fas fa-save" aria-hidden="true"></i> Salvar
+               </button>${semSenha}`;
         return `
-            <div class="usuario-item">
+            <div class="usuario-item" data-id="${u.id}">
                 <div class="usuario-info">
                     <span class="usuario-nome">${escaparHTML(u.nome || '-')}</span>
                     <span class="usuario-email">${escaparHTML(u.email || 'sem e-mail')}</span>
                 </div>
-                <div class="usuario-tags">
-                    <span class="log-badge ${papelCor}">${papelTxt}</span>${acesso}
-                </div>
+                <div class="usuario-controles">${controles}</div>
             </div>`;
     }).join('');
 }
@@ -1196,11 +1427,14 @@ async function criarUsuarioAdmin(event) {
     const email = document.getElementById('novoUsuarioEmail').value.trim();
     const senha = document.getElementById('novoUsuarioSenha').value;
     const papel = document.getElementById('novoUsuarioPapel').value;
+    // Coleta as abas marcadas (só valem para usuário comum)
+    const permissoes = Array.from(
+        document.querySelectorAll('#formNovoUsuario .perm-check:checked')).map(c => c.value);
     try {
         const resp = await fetch(`${API_BASE_URL}/usuarios`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nome, email, senha, papel })
+            body: JSON.stringify({ nome, email, senha, papel, permissoes })
         });
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok) throw new Error(data.error || 'Falha ao criar usuário');
@@ -1209,6 +1443,24 @@ async function criarUsuarioAdmin(event) {
         carregarUsuarios();
     } catch (e) {
         mostrarToast(e.message, 'error');
+    }
+}
+
+// Salva as abas liberadas de um usuário comum (PUT). Vale no próximo login dele.
+async function salvarPermissoesUsuario(id) {
+    const row = document.querySelector(`.usuario-item[data-id="${id}"]`);
+    if (!row) return;
+    const permissoes = Array.from(row.querySelectorAll('.uperm:checked')).map(c => c.value);
+    try {
+        const resp = await fetch(`${API_BASE_URL}/usuarios/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ permissoes })
+        });
+        if (!resp.ok) throw new Error('Falha ao salvar');
+        mostrarToast('Permissões salvas (valem no próximo login do usuário).', 'success');
+    } catch (e) {
+        mostrarToast('Não foi possível salvar as permissões.', 'error');
     }
 }
 

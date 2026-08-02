@@ -28,7 +28,7 @@
     <link rel="icon" href="favicon.ico">
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
     <meta name="theme-color" content="#2f6bff">
-    <link rel="stylesheet" href="style.css?v=21">
+    <link rel="stylesheet" href="style.css?v=24">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- jsPDF: unica dependencia de PDF (o html2pdf foi removido, nao era mais usado) -->
@@ -62,12 +62,12 @@
                             <i class="fas fa-calculator" aria-hidden="true"></i>
                             Calculadora
                         </button>
-                        <button class="nav-btn" data-tab="history" role="menuitem">
+                        <button class="nav-btn" data-tab="history" data-perm="history" role="menuitem">
                             <i class="fas fa-history" aria-hidden="true"></i>
                             Histórico
                             <span class="history-count" id="historyCount" aria-label="cálculos no histórico">0</span>
                         </button>
-                        <button class="nav-btn" data-tab="produtos" data-admin role="menuitem">
+                        <button class="nav-btn" data-tab="produtos" data-perm="produtos" role="menuitem">
                             <i class="fas fa-fish" aria-hidden="true"></i>
                             Produtos
                         </button>
@@ -390,6 +390,21 @@
                             Adicionar produto
                         </button>
                     </form>
+
+                    <!-- Gerenciar tipos de embalagem (nome + valor). Ficam disponíveis no perfil do produto. -->
+                    <div class="produtos-section embalagens-section">
+                        <h3><i class="fas fa-box-open" aria-hidden="true"></i> Tipos de embalagem</h3>
+                        <p class="produtos-hint">Cadastre as embalagens e seus valores. No perfil de cada produto você escolhe qual embalagem ele usa.</p>
+                        <div id="listaEmbalagens" class="embalagens-lista"></div>
+                        <form id="formNovaEmbalagem" class="produto-novo">
+                            <input type="text" id="novaEmbalagemNome" placeholder="Nome da embalagem (ex.: Caixa 5kg)" aria-label="Nome da embalagem">
+                            <input type="number" id="novaEmbalagemValor" step="0.01" min="0" inputmode="decimal" placeholder="Valor (R$)" aria-label="Valor da embalagem">
+                            <button type="submit" class="action-btn primary">
+                                <i class="fas fa-plus" aria-hidden="true"></i>
+                                Adicionar embalagem
+                            </button>
+                        </form>
+                    </div>
                 </div>
             </div>
 
@@ -475,10 +490,18 @@
                             <div class="form-group">
                                 <label for="novoUsuarioPapel">Papel</label>
                                 <select id="novoUsuarioPapel">
-                                    <option value="leitura">Leitura (só usa a calculadora)</option>
+                                    <option value="leitura">Comum (acesso por abas)</option>
                                     <option value="admin">Admin (acesso total)</option>
                                 </select>
                             </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Abas liberadas (para usuário comum)</label>
+                            <div class="perm-checks">
+                                <label><input type="checkbox" class="perm-check" value="history"> Histórico</label>
+                                <label><input type="checkbox" class="perm-check" value="produtos"> Produtos</label>
+                            </div>
+                            <small class="perm-hint">A Calculadora é sempre liberada. Ignorado quando o papel é Admin.</small>
                         </div>
                         <button type="submit" class="action-btn primary">
                             <i class="fas fa-user-plus" aria-hidden="true"></i>
@@ -561,29 +584,28 @@
                     <div class="form-row">
                         <div class="form-group">
                             <label for="perfil_categoria">Categoria / Tipo</label>
-                            <input type="text" id="perfil_categoria" placeholder="Ex.: Filé, Posta, Frutos do mar">
+                            <!-- list=: mostra as categorias já cadastradas, mas ainda deixa digitar uma nova -->
+                            <input type="text" id="perfil_categoria" list="listaCategorias"
+                                   placeholder="Escolha ou digite uma nova">
+                            <datalist id="listaCategorias"></datalist>
                         </div>
                         <div class="form-group">
                             <label for="perfil_fornecedor">Fornecedor / Marca</label>
-                            <input type="text" id="perfil_fornecedor">
+                            <input type="text" id="perfil_fornecedor" list="listaFornecedores"
+                                   placeholder="Escolha ou digite um novo">
+                            <datalist id="listaFornecedores"></datalist>
                         </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
-                            <label for="perfil_lote">Lote</label>
-                            <input type="text" id="perfil_lote" placeholder="Ex.: L2026-045">
-                        </div>
-                        <div class="form-group">
-                            <label for="perfil_fabricacao">Fabricação</label>
-                            <input type="date" id="perfil_fabricacao">
+                            <label for="perfil_embalagem">Tipo de embalagem</label>
+                            <select id="perfil_embalagem">
+                                <option value="">— Nenhuma —</option>
+                            </select>
                         </div>
                     </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="perfil_validade">Validade</label>
-                            <input type="date" id="perfil_validade">
-                        </div>
-                    </div>
+                    <!-- Lote/validade/fabricação saíram daqui: agora são gerenciados na
+                         seção "Lotes" abaixo (cada partida com a sua validade). -->
 
                     <!-- Embalagem: quantidade + unidade + peso por unidade -> peso total (calculado) -->
                     <div class="form-row">
@@ -624,6 +646,21 @@
                     </div>
                 </form>
 
+                <!-- Lotes: cada partida com código, fabricação, validade e quantidade -->
+                <div class="lotes-section">
+                    <h4><i class="fas fa-layer-group" aria-hidden="true"></i> Lotes</h4>
+                    <div id="listaLotes" class="lotes-lista"></div>
+                    <form id="formNovoLote" class="lote-novo">
+                        <input type="text" id="loteCodigo" placeholder="Código (ex.: L2026-045)" aria-label="Código do lote">
+                        <label class="lote-campo">Fab. <input type="date" id="loteFabricacao" aria-label="Fabricação"></label>
+                        <label class="lote-campo">Val. <input type="date" id="loteValidade" aria-label="Validade"></label>
+                        <input type="number" id="loteQuantidade" step="0.01" min="0" inputmode="decimal" placeholder="Qtd (Kg)" aria-label="Quantidade">
+                        <button type="submit" class="action-btn primary">
+                            <i class="fas fa-plus" aria-hidden="true"></i> Adicionar lote
+                        </button>
+                    </form>
+                </div>
+
                 <div class="historico-precos">
                     <h4><i class="fas fa-clock-rotate-left" aria-hidden="true"></i> Histórico de alterações</h4>
                     <div id="listaHistorico"></div>
@@ -646,7 +683,7 @@
     <!-- Logica extraida do script.js (carregada antes dele) -->
     <script src="calculo.js?v=15"></script>
     <script src="validacao.js?v=15"></script>
-    <script src="script.js?v=21"></script>
+    <script src="script.js?v=24"></script>
     <!-- Carregados DEPOIS do script.js para sobrescrever a exportacao de PDF -->
     <script src="pdf-relatorio.js?v=15"></script>
     <script src="historico-selecao.js?v=15"></script>

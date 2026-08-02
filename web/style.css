@@ -1594,6 +1594,36 @@ select:focus-visible {
 }
 .usuario-novo h3 { margin: 0 0 0.75rem; font-size: 1rem; }
 
+/* Controles de permissão (checkboxes) na lista e no formulário */
+.usuario-controles { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; flex-shrink: 0; }
+.usuario-controles label,
+.perm-checks label {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 0.85rem; color: var(--text-secondary, #6b7280); cursor: pointer;
+}
+.usuario-controles input[type="checkbox"],
+.perm-checks input[type="checkbox"] { width: auto; margin: 0; }
+.perm-checks { display: flex; gap: 16px; margin-top: 4px; }
+.perm-hint { display: block; margin-top: 4px; font-size: 0.78rem; color: var(--text-muted, #9ca3af); }
+
+/* Tipos de embalagem: lista editável (nome + valor) */
+.embalagens-section { margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--border-color, #e5e7eb); }
+.embalagens-lista { display: flex; flex-direction: column; gap: 8px; margin: 0.75rem 0; }
+.embalagem-item { display: flex; align-items: center; gap: 8px; }
+.embalagem-item .emb-nome { flex: 1 1 auto; }
+.embalagem-item .emb-valor { width: 110px; flex: 0 0 auto; }
+.btn-produto.btn-excluir { color: var(--error-color); }
+
+/* Lotes no perfil do produto */
+.lotes-section { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--border-color, #e5e7eb); }
+.lotes-section h4 { margin: 0 0 0.5rem; font-size: 1rem; }
+.lotes-lista { display: flex; flex-direction: column; gap: 8px; margin-bottom: 0.75rem; }
+.lote-item, .lote-novo { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.lote-item .lote-cod, .lote-novo #loteCodigo { flex: 1 1 120px; min-width: 100px; }
+.lote-item .lote-qtd, .lote-novo #loteQuantidade { width: 90px; flex: 0 0 auto; }
+.lote-campo { display: inline-flex; align-items: center; gap: 4px; font-size: 0.8rem; color: var(--text-secondary, #6b7280); }
+.lote-campo input { width: auto; }
+
 /* --- 4) LABEL reage ao foco do campo (sem JS, so :focus-within) ---------- */
 .form-group:focus-within > label,
 .filter-field:focus-within > label {

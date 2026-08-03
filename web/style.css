@@ -289,11 +289,26 @@ input::placeholder {
 
 select {
     cursor: pointer;
+    /* appearance:none remove a seta NATIVA do sistema (que não segue o tema);
+       assim fica só a nossa seta custom, igual em todos os navegadores. */
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
     background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3e%3c/svg%3e");
     background-position: right 0.5rem center;
     background-repeat: no-repeat;
     background-size: 1.5em 1.5em;
     padding-right: 2.5rem;
+}
+
+/* Anel de foco por teclado (Tab) em todos os botões: mesma cor do tema, para
+   acessibilidade e um acabamento uniforme em todo o app. */
+.action-btn:focus-visible,
+.btn-produto:focus-visible,
+.calculate-btn:focus-visible,
+.nav-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35);
 }
 
 /* Button styles */
@@ -1623,6 +1638,36 @@ select:focus-visible {
 .lote-item .lote-qtd, .lote-novo #loteQuantidade { width: 90px; flex: 0 0 auto; }
 .lote-campo { display: inline-flex; align-items: center; gap: 4px; font-size: 0.8rem; color: var(--text-secondary, #6b7280); }
 .lote-campo input { width: auto; }
+
+/* Modal do perfil do produto: mais largo que os outros (tem muita informação) */
+#produtoModal .modal { max-width: 900px; }
+
+/* Combobox custom: substitui o <datalist> nativo (que ignora o tema do site).
+   Usa as MESMAS variáveis do site, então acompanha o modo claro/escuro. */
+.combobox { position: relative; }
+.combobox-opcoes {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    z-index: 60;
+    max-height: 220px;
+    overflow-y: auto;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    padding: 4px;
+}
+.combobox-op {
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+}
+.combobox-op:hover,
+.combobox-op.ativo { background: var(--border-light); color: var(--primary-color); }
 
 /* --- 4) LABEL reage ao foco do campo (sem JS, so :focus-within) ---------- */
 .form-group:focus-within > label,

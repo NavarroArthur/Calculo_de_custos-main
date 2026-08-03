@@ -161,6 +161,9 @@ function inicializarEventos() {
     // Lotes: adicionar novo (form dentro do modal de perfil)
     const formLote = document.getElementById('formNovoLote');
     if (formLote) formLote.addEventListener('submit', adicionarLote);
+    // Comboboxes de categoria e fornecedor (sugerem valores já cadastrados)
+    initCombobox('perfil_categoria', 'opcoesCategoria', () => valoresDistintos('categoria'));
+    initCombobox('perfil_fornecedor', 'opcoesFornecedor', () => valoresDistintos('fornecedor'));
     const btnLogout = document.getElementById('btnLogout');
     if (btnLogout) btnLogout.addEventListener('click', logout);
     const btnBaixarBackup = document.getElementById('btnBaixarBackup');
@@ -725,7 +728,6 @@ async function carregarProdutos() {
             PRODUTOS = data.produtos;
             popularSelectProdutos();
             renderListaProdutos();
-            popularDatalistsProduto();
             await carregarEmbalagens();
         }
     } catch (error) {
@@ -759,13 +761,38 @@ function popularSelectEmbalagem() {
 }
 
 // Preenche as datalists de categoria e fornecedor com os valores JÁ cadastrados
-function popularDatalistsProduto() {
-    const cats = [...new Set(PRODUTOS.map(p => (p.categoria || '').trim()).filter(Boolean))].sort();
-    const forns = [...new Set(PRODUTOS.map(p => (p.fornecedor || '').trim()).filter(Boolean))].sort();
-    const dcat = document.getElementById('listaCategorias');
-    const dforn = document.getElementById('listaFornecedores');
-    if (dcat) dcat.innerHTML = cats.map(c => `<option value="${esc(c)}"></option>`).join('');
-    if (dforn) dforn.innerHTML = forns.map(f => `<option value="${esc(f)}"></option>`).join('');
+// Devolve os valores distintos de um campo dos produtos (para as sugestões)
+function valoresDistintos(campo) {
+    return [...new Set(PRODUTOS.map(p => (p[campo] || '').trim()).filter(Boolean))].sort();
+}
+
+// Combobox custom (input + lista estilizada). Substitui o <datalist> nativo, que
+// não respeita o tema do site. Sugere valores existentes e deixa digitar um novo.
+function initCombobox(inputId, boxId, getOpcoes) {
+    const input = document.getElementById(inputId);
+    const box = document.getElementById(boxId);
+    if (!input || !box) return;
+
+    function render() {
+        const termo = input.value.trim().toLowerCase();
+        const ops = getOpcoes().filter(o => o.toLowerCase().includes(termo));
+        if (!ops.length) { box.hidden = true; return; }
+        box.innerHTML = ops.map(o => `<div class="combobox-op" role="option">${esc(o)}</div>`).join('');
+        box.hidden = false;
+    }
+    input.addEventListener('focus', render);
+    input.addEventListener('input', render);
+    // Esconde ao sair do campo (com atraso para o clique na opção acontecer antes)
+    input.addEventListener('blur', () => setTimeout(() => { box.hidden = true; }, 150));
+    // mousedown (não click) para disparar ANTES do blur do input
+    box.addEventListener('mousedown', (e) => {
+        const op = e.target.closest('.combobox-op');
+        if (!op) return;
+        e.preventDefault();
+        input.value = op.textContent;
+        box.hidden = true;
+        input.dispatchEvent(new Event('change'));
+    });
 }
 
 // Renderiza a lista editável de embalagens (nome + valor, com Salvar e Remover)
@@ -984,8 +1011,7 @@ async function abrirPerfilProduto(id) {
         document.getElementById('perfil_quantidade').value = produto.quantidade ?? '';
         document.getElementById('perfil_unidade').value = produto.unidade || '';
         document.getElementById('perfil_peso_unitario').value = produto.peso_unitario ?? '';
-        // Datalists de categoria/fornecedor e o select de tipo de embalagem
-        popularDatalistsProduto();
+        // Select de tipo de embalagem (as sugestões de categoria/fornecedor são o combobox)
         popularSelectEmbalagem();
         document.getElementById('perfil_embalagem').value = produto.embalagem_id || '';
         calcPesoTotalPerfil();

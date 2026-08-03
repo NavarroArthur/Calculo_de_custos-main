@@ -28,7 +28,7 @@
     <link rel="icon" href="favicon.ico">
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
     <meta name="theme-color" content="#2f6bff">
-    <link rel="stylesheet" href="style.css?v=24">
+    <link rel="stylesheet" href="style.css?v=26">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- jsPDF: unica dependencia de PDF (o html2pdf foi removido, nao era mais usado) -->
@@ -584,16 +584,20 @@
                     <div class="form-row">
                         <div class="form-group">
                             <label for="perfil_categoria">Categoria / Tipo</label>
-                            <!-- list=: mostra as categorias já cadastradas, mas ainda deixa digitar uma nova -->
-                            <input type="text" id="perfil_categoria" list="listaCategorias"
-                                   placeholder="Escolha ou digite uma nova">
-                            <datalist id="listaCategorias"></datalist>
+                            <!-- combobox custom: sugere as categorias já cadastradas e deixa digitar uma nova -->
+                            <div class="combobox">
+                                <input type="text" id="perfil_categoria" autocomplete="off"
+                                       placeholder="Escolha ou digite uma nova">
+                                <div class="combobox-opcoes" id="opcoesCategoria" role="listbox" hidden></div>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label for="perfil_fornecedor">Fornecedor / Marca</label>
-                            <input type="text" id="perfil_fornecedor" list="listaFornecedores"
-                                   placeholder="Escolha ou digite um novo">
-                            <datalist id="listaFornecedores"></datalist>
+                            <div class="combobox">
+                                <input type="text" id="perfil_fornecedor" autocomplete="off"
+                                       placeholder="Escolha ou digite um novo">
+                                <div class="combobox-opcoes" id="opcoesFornecedor" role="listbox" hidden></div>
+                            </div>
                         </div>
                     </div>
                     <div class="form-row">
@@ -683,7 +687,7 @@
     <!-- Logica extraida do script.js (carregada antes dele) -->
     <script src="calculo.js?v=15"></script>
     <script src="validacao.js?v=15"></script>
-    <script src="script.js?v=24"></script>
+    <script src="script.js?v=26"></script>
     <!-- Carregados DEPOIS do script.js para sobrescrever a exportacao de PDF -->
     <script src="pdf-relatorio.js?v=15"></script>
     <script src="historico-selecao.js?v=15"></script>

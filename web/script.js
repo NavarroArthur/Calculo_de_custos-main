@@ -889,8 +889,8 @@ function renderInsumosCatalogo() {
                 <button type="button" class="btn-produto btn-salvar" onclick="salvarInsumo(${i.id})">
                     <i class="fas fa-save" aria-hidden="true"></i> Salvar
                 </button>
-                <button type="button" class="btn-produto btn-excluir" onclick="removerInsumo(${i.id})">
-                    <i class="fas fa-trash" aria-hidden="true"></i>
+                <button type="button" class="btn-produto btn-excluir" onclick="removerInsumo(${i.id})" aria-label="Excluir insumo" title="Excluir insumo">
+                    <i class="fas fa-trash" aria-hidden="true"></i> Excluir
                 </button>
             </div>`).join('') : '<p class="produtos-hint">Nenhum tipo cadastrado ainda.</p>';
         return `
@@ -1174,8 +1174,8 @@ function renderLotes(lotes) {
             <label class="lote-campo">Fab. <input type="date" class="lote-fab" value="${l.fabricacao || ''}"></label>
             <label class="lote-campo">Val. <input type="date" class="lote-val" value="${l.validade || ''}"></label>
             <input type="number" class="lote-qtd" value="${l.quantidade ?? ''}" step="0.01" min="0" inputmode="decimal" placeholder="kg" aria-label="Quantidade">
-            <button type="button" class="btn-produto btn-salvar" onclick="salvarLote(${l.id})"><i class="fas fa-save" aria-hidden="true"></i></button>
-            <button type="button" class="btn-produto btn-excluir" onclick="removerLote(${l.id})"><i class="fas fa-trash" aria-hidden="true"></i></button>
+            <button type="button" class="btn-produto btn-salvar" onclick="salvarLote(${l.id})" aria-label="Salvar lote" title="Salvar lote"><i class="fas fa-save" aria-hidden="true"></i> Salvar</button>
+            <button type="button" class="btn-produto btn-excluir" onclick="removerLote(${l.id})" aria-label="Excluir lote" title="Excluir lote"><i class="fas fa-trash" aria-hidden="true"></i> Excluir</button>
         </div>`;
     }).join('');
 }
@@ -1365,6 +1365,11 @@ async function salvarNoBanco(dados) {
                 sacos_de_gelo: dados.sacos_de_gelo,
                 caixa_papelao: dados.caixa_papelao,
                 preco_venda: dados.preco_venda,
+                // Tipos de insumo escolhidos: sem isto, o servidor usava o preço padrão
+                // e a escolha do tipo não tinha efeito online.
+                gelo_insumo_id: dados.gelo_insumo_id,
+                papelao_insumo_id: dados.papelao_insumo_id,
+                fita_insumo_id: dados.fita_insumo_id,
                 embalagem_id: dados.embalagem_id,
                 embalagem_qtd: dados.embalagem_qtd,
                 observacoes: 'Calculado via interface web'
@@ -1408,12 +1413,19 @@ async function carregarHistoricoAPI() {
                     peso_inicial: calculo.peso_inicial,
                     peso_final: calculo.peso_final,
                     sacos_de_gelo: calculo.sacos_gelo,
-                    caixa_papelao: calculo.caixas_papelao
+                    caixa_papelao: calculo.caixas_papelao,
+                    // Tipos usados na época (para reabrir/duplicar já re-selecionando)
+                    gelo_insumo_id: calculo.gelo_insumo_id,
+                    papelao_insumo_id: calculo.papelao_insumo_id,
+                    fita_insumo_id: calculo.fita_insumo_id,
+                    embalagem_id: calculo.embalagem_id,
+                    embalagem_qtd: calculo.embalagem_qtd
                 },
                 resultados: {
                     custo_sacos_gelo: calculo.custo_sacos_gelo,
                     custo_papelao: calculo.custo_papelao,
                     custo_fita_papelao: calculo.custo_fita_papelao,
+                    custo_embalagem: calculo.custo_embalagem || 0,
                     diferenca_pesos: calculo.diferenca_pesos,
                     custo_producao: calculo.custo_producao,
                     custo_pos_beneficiamento: calculo.custo_pos_beneficiamento,
@@ -1538,14 +1550,21 @@ function renderUsuarios(usuarios) {
         const perms = (u.permissoes || '').split(',').map(s => s.trim());
         const marc = p => perms.includes(p) ? 'checked' : '';
         const semSenha = u.tem_senha ? '' : ' <span class="log-badge aviso">sem senha (não loga)</span>';
+        // Status do 2FA + botão para o admin resetar (quando o usuário perde o app).
+        const badge2fa = u.totp_confirmado
+            ? '<span class="log-badge ok">2FA ativo</span>'
+            : '<span class="log-badge aviso">2FA pendente</span>';
+        const btnReset2fa = `<button type="button" class="btn-produto btn-excluir" onclick="resetar2FA(${u.id})" title="Resetar 2FA do usuário">
+                   <i class="fas fa-shield-halved" aria-hidden="true"></i> Resetar 2FA
+               </button>`;
         // Admin: acesso total (sem edição de abas aqui). Comum: escolhe as abas.
         const controles = (u.papel === 'admin')
-            ? `<span class="log-badge erro">Admin — acesso total</span>${semSenha}`
+            ? `<span class="log-badge erro">Admin — acesso total</span> ${badge2fa} ${btnReset2fa}${semSenha}`
             : `<label><input type="checkbox" class="uperm" value="history" ${marc('history')}> Histórico</label>
                <label><input type="checkbox" class="uperm" value="produtos" ${marc('produtos')}> Produtos e preços de insumo</label>
                <button type="button" class="btn-produto btn-salvar" onclick="salvarPermissoesUsuario(${u.id})">
                    <i class="fas fa-save" aria-hidden="true"></i> Salvar
-               </button>${semSenha}`;
+               </button> ${badge2fa} ${btnReset2fa}${semSenha}`;
         return `
             <div class="usuario-item" data-id="${u.id}">
                 <div class="usuario-info">
@@ -1597,6 +1616,19 @@ async function salvarPermissoesUsuario(id) {
         mostrarToast('Permissões salvas (valem no próximo login do usuário).', 'success');
     } catch (e) {
         mostrarToast('Não foi possível salvar as permissões.', 'error');
+    }
+}
+
+// Reseta o 2FA de um usuário (só admin). No próximo login ele configura de novo.
+async function resetar2FA(id) {
+    if (!confirm('Resetar o 2FA deste usuário? No próximo login ele terá que configurar tudo de novo. Use quando a pessoa perdeu o app autenticador e os códigos de backup.')) return;
+    try {
+        const resp = await fetch(`${API_BASE_URL}/usuarios/${id}/reset-2fa`, { method: 'POST' });
+        if (!resp.ok) throw new Error('Falha ao resetar 2FA');
+        mostrarToast('2FA resetado. O usuário vai reconfigurar no próximo login.', 'success');
+        carregarUsuarios();
+    } catch (e) {
+        mostrarToast('Não foi possível resetar o 2FA.', 'error');
     }
 }
 
@@ -1823,24 +1855,39 @@ function atualizarHistorico() {
     if (typeof aplicarSelecaoNaLista === 'function') aplicarSelecaoNaLista();
 }
 
+// Re-seleciona os selects de tipo de insumo e a embalagem a partir dos dados
+// salvos, para reabrir/duplicar um cálculo já com as escolhas da época.
+function preencherTiposInsumo(dados) {
+    const set = (id, val) => {
+        const el = document.getElementById(id);
+        if (el && val !== undefined && val !== null) el.value = String(val);
+    };
+    set('gelo_insumo_id', dados.gelo_insumo_id);
+    set('papelao_insumo_id', dados.papelao_insumo_id);
+    set('fita_insumo_id', dados.fita_insumo_id);
+    set('calc_embalagem', dados.embalagem_id);
+    set('calc_embalagem_qtd', dados.embalagem_qtd);
+}
+
 function visualizarHistorico(id) {
     const calculo = historicoCalculos.find(c => c.id === id);
     if (!calculo) return;
-    
+
     // Preencher formulário com os dados do histórico
     Object.keys(campos).forEach(key => {
         if (campos[key] && calculo.dados[key] !== undefined) {
             campos[key].value = calculo.dados[key];
         }
     });
-    
-    // Calcular e mostrar resultados
-    const resultados = calcularCustos(calculo.dados);
-    exibirResultados(calculo.dados, resultados);
-    
+    preencherTiposInsumo(calculo.dados);
+
+    // Mostra os resultados SALVOS (com os preços praticados na época), sem recalcular.
+    // Antes recalculava com os preços atuais/padrão, o que mudava os números do passado.
+    exibirResultados(calculo.dados, calculo.resultados);
+
     // Voltar para a aba de calculadora
     switchTab('calculator');
-    
+
     mostrarToast('Cálculo carregado do histórico!', 'success');
 }
 
@@ -1854,10 +1901,11 @@ function duplicarCalculo(id) {
             campos[key].value = calculo.dados[key];
         }
     });
-    
+    preencherTiposInsumo(calculo.dados);
+
     // Voltar para a aba de calculadora
     switchTab('calculator');
-    
+
     mostrarToast('Dados copiados para novo cálculo!', 'success');
 }
 

@@ -26,10 +26,10 @@ git clone https://github.com/NavarroArthur/Calculo_de_custos-main.git
 ### 1.3 Criar o ambiente virtual e instalar as dependências
 Ainda no Bash:
 ```bash
-mkvirtualenv --python=/usr/bin/python3.10 calc-env
+mkvirtualenv --python=/usr/bin/python3.10 calculo-venv
 pip install -r Calculo_de_custos-main/requirements.txt
 ```
-Guarde o nome do ambiente: **`calc-env`**.
+Guarde o nome do ambiente: **`calculo-venv`**.
 
 ### 1.4 Criar o Web app
 1. Vá na aba **Web → Add a new web app**.
@@ -40,7 +40,7 @@ Na página do Web app, preencha:
 
 - **Source code:** `/home/SEU_USUARIO/Calculo_de_custos-main`
 - **Working directory:** `/home/SEU_USUARIO/Calculo_de_custos-main`
-- **Virtualenv:** `/home/SEU_USUARIO/.virtualenvs/calc-env`
+- **Virtualenv:** `/home/SEU_USUARIO/.virtualenvs/calculo-venv`
 
 ### 1.6 Editar o arquivo WSGI (é aqui que a mágica acontece)
 Clique no link do **WSGI configuration file** (algo como `/var/www/SEU_USUARIO_pythonanywhere_com_wsgi.py`). **Apague tudo** e coloque:
@@ -149,10 +149,16 @@ Quando você mudar o código no PC e der `push` no GitHub:
 - **Site:** o GitHub Pages atualiza sozinho (o workflow roda no push).
 - **API:** entre no **Bash** do PythonAnywhere e rode:
   ```bash
-  cd Calculo_de_custos-main
+  workon calculo-venv                 # ativa o virtualenv certo (nome do seu ambiente)
+  cd ~/Calculo_de_custos-main
   git pull
+  pip install -r requirements.txt     # instala dependências NOVAS, se houver
   ```
   Depois vá na aba **Web** e clique em **Reload**.
+
+  > O `pip install` é o passo que mais esquece — se uma versão nova adicionou uma
+  > biblioteca (ex.: `pyotp`, `sentry-sdk`) e você não instalar no virtualenv, a API
+  > quebra ao subir com `ModuleNotFoundError`. Rode-o sempre que atualizar.
 
 ---
 

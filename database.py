@@ -258,6 +258,9 @@ class DatabaseManager:
             # Migração única: monta o catálogo de insumos a partir do que já existe
             # (preços fixos de gelo/papelão/fita + embalagens já cadastradas).
             self._migrar_insumos(cursor)
+            # Migração: colunas no 'calculos' para guardar QUAL tipo de insumo foi
+            # usado e o custo da embalagem (rastreabilidade + histórico fiel).
+            self._migrar_calculos_insumos(cursor)
             # Inserir produtos padrão (só entram na primeira vez)
             self._insert_default_produtos(cursor)
             # Migração única: unifica os históricos antigos (preços/validades) no novo formato
@@ -455,6 +458,25 @@ class DatabaseManager:
         if 'senha_hash' not in existentes:
             cursor.execute('ALTER TABLE usuarios ADD COLUMN senha_hash TEXT')
 
+    def _migrar_calculos_insumos(self, cursor):
+        """Adiciona ao 'calculos' as colunas que registram QUAL insumo foi usado em
+        cada cálculo (gelo/papelão/fita/embalagem) e o custo da embalagem. Antes, só
+        o custo total ficava salvo — perdia-se o tipo e a embalagem não reabria fiel.
+        Colunas nulas: cálculos antigos continuam válidos (só sem esses detalhes)."""
+        cursor.execute('PRAGMA table_info(calculos)')
+        existentes = {linha[1] for linha in cursor.fetchall()}
+        novas = {
+            'custo_embalagem': 'REAL',
+            'gelo_insumo_id': 'INTEGER',
+            'papelao_insumo_id': 'INTEGER',
+            'fita_insumo_id': 'INTEGER',
+            'embalagem_id': 'INTEGER',
+            'embalagem_qtd': 'INTEGER',
+        }
+        for nome, tipo in novas.items():
+            if nome not in existentes:
+                cursor.execute(f'ALTER TABLE calculos ADD COLUMN {nome} {tipo}')
+
     def _migrar_usuarios_2fa(self, cursor):
         """Adiciona as colunas de 2FA na tabela usuarios, se ainda não existirem:
           - totp_secret: o segredo base32 do autenticador (por usuário);
@@ -584,6 +606,22 @@ class DatabaseManager:
         finally:
             conn.close()
 
+    def resetar_2fa(self, usuario_id: int):
+        """Zera o 2FA de um usuário: apaga o segredo, marca como não confirmado e
+        remove os códigos de backup. No próximo login, ele é levado a configurar de
+        novo. Usado pelo admin quando alguém perde o app autenticador."""
+        conn = self._conectar()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                'UPDATE usuarios SET totp_secret = NULL, totp_confirmado = 0 WHERE id = ?',
+                (usuario_id,))
+            cursor.execute('DELETE FROM backup_codes WHERE usuario_id = ?', (usuario_id,))
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            conn.close()
+
     def definir_permissoes_usuario(self, usuario_id: int, permissoes: str):
         """Grava as abas liberadas do usuário (string separada por vírgula)."""
         conn = self._conectar()
@@ -617,7 +655,7 @@ class DatabaseManager:
             cursor.execute('''
                 SELECT id, nome, email, papel, permissoes,
                        (senha_hash IS NOT NULL AND senha_hash != '') AS tem_senha,
-                       created_at
+                       totp_confirmado, created_at
                 FROM usuarios ORDER BY nome
             ''')
             return [dict(row) for row in cursor.fetchall()]
@@ -705,7 +743,9 @@ class DatabaseManager:
         return destino
 
     # SELECT reaproveitado: traz o produto + nome/valor da embalagem (LEFT JOIN,
-    # pois embalagem_id pode ser NULL). 'p' = produtos, 'e' = embalagens.
+    # pois embalagem_id pode ser NULL). A embalagem agora vive no catálogo de
+    # 'insumos' (categoria 'embalagem'); por isso o JOIN é com insumos, não com a
+    # tabela antiga 'embalagens'. 'p' = produtos, 'e' = insumo de embalagem.
     _SELECT_PRODUTO = '''
         SELECT p.id, p.nome, p.preco_kg, p.validade, p.fornecedor, p.categoria,
                p.lote, p.fabricacao, p.observacoes, p.quantidade, p.unidade,
@@ -716,7 +756,7 @@ class DatabaseManager:
                   AS proxima_validade,
                (SELECT COUNT(*) FROM lotes l WHERE l.produto_id = p.id) AS num_lotes
         FROM produtos p
-        LEFT JOIN embalagens e ON e.id = p.embalagem_id
+        LEFT JOIN insumos e ON e.id = p.embalagem_id AND e.categoria = 'embalagem'
     '''
 
     def listar_produtos(self):
@@ -742,75 +782,9 @@ class DatabaseManager:
         finally:
             conn.close()
 
-    # ----------------------------------------------------------------------
-    # Tipos de embalagem (nome + valor)
-    # ----------------------------------------------------------------------
-    def listar_embalagens(self):
-        """Lista os tipos de embalagem, em ordem alfabética."""
-        conn = self._conectar()
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        try:
-            cursor.execute('SELECT id, nome, valor FROM embalagens ORDER BY nome')
-            return [dict(row) for row in cursor.fetchall()]
-        finally:
-            conn.close()
-
-    def obter_embalagem(self, embalagem_id: int):
-        """Retorna uma embalagem (id, nome, valor) pelo id, ou None se nao existir.
-        Usado pelo calculo para pegar o VALOR no servidor (fonte confiavel), em vez
-        de confiar no valor enviado pelo cliente."""
-        conn = self._conectar()
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        try:
-            cursor.execute('SELECT id, nome, valor FROM embalagens WHERE id = ?', (embalagem_id,))
-            row = cursor.fetchone()
-            return dict(row) if row else None
-        finally:
-            conn.close()
-
-    def criar_embalagem(self, nome: str, valor: float = 0) -> int:
-        """Cria um tipo de embalagem. Levanta ValueError se o nome já existir."""
-        conn = self._conectar()
-        cursor = conn.cursor()
-        try:
-            cursor.execute('INSERT INTO embalagens (nome, valor) VALUES (?, ?)',
-                           (nome, valor))
-            conn.commit()
-            return cursor.lastrowid
-        except sqlite3.IntegrityError:
-            raise ValueError('Já existe uma embalagem com esse nome')
-        finally:
-            conn.close()
-
-    def atualizar_embalagem(self, embalagem_id: int, nome: str, valor: float):
-        """Atualiza nome e valor de uma embalagem."""
-        conn = self._conectar()
-        cursor = conn.cursor()
-        try:
-            cursor.execute('UPDATE embalagens SET nome = ?, valor = ? WHERE id = ?',
-                           (nome, valor, embalagem_id))
-            conn.commit()
-            return cursor.rowcount
-        except sqlite3.IntegrityError:
-            raise ValueError('Já existe uma embalagem com esse nome')
-        finally:
-            conn.close()
-
-    def remover_embalagem(self, embalagem_id: int):
-        """Remove uma embalagem e desvincula os produtos que a usavam (viram NULL)."""
-        conn = self._conectar()
-        cursor = conn.cursor()
-        try:
-            # Desvincula antes de apagar, para não deixar produtos apontando para o vazio
-            cursor.execute('UPDATE produtos SET embalagem_id = NULL WHERE embalagem_id = ?',
-                           (embalagem_id,))
-            cursor.execute('DELETE FROM embalagens WHERE id = ?', (embalagem_id,))
-            conn.commit()
-            return cursor.rowcount
-        finally:
-            conn.close()
+    # (Os antigos métodos de 'embalagens' foram removidos: embalagem agora é uma
+    #  categoria de insumo, gerenciada pelos métodos de insumo abaixo. A tabela
+    #  'embalagens' segue existindo só como origem da migração _migrar_insumos.)
 
     # ----------------------------------------------------------------------
     # Insumos (catálogo unificado: gelo, papelão, fita, embalagem, ...)
@@ -1150,11 +1124,12 @@ class DatabaseManager:
                 INSERT INTO calculos (
                     usuario_id, produto, categoria, preco_kg, peso_inicial, peso_final,
                     sacos_gelo, caixas_papelao,
-                    custo_sacos_gelo, custo_papelao, custo_fita_papelao,
+                    custo_sacos_gelo, custo_papelao, custo_fita_papelao, custo_embalagem,
                     diferenca_pesos, custo_producao, custo_pos_beneficiamento,
                     porcentagem_beneficiamento, diferenca_valor, custos_totais,
-                    custo_final, observacoes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    custo_final, observacoes,
+                    gelo_insumo_id, papelao_insumo_id, fita_insumo_id, embalagem_id, embalagem_qtd
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 usuario_id,
                 dados_calculo['produto'],
@@ -1167,6 +1142,7 @@ class DatabaseManager:
                 resultados['custo_sacos_gelo'],
                 resultados['custo_papelao'],
                 resultados['custo_fita_papelao'],
+                resultados.get('custo_embalagem', 0),
                 resultados['diferenca_pesos'],
                 resultados['custo_producao'],
                 resultados['custo_pos_beneficiamento'],
@@ -1174,7 +1150,12 @@ class DatabaseManager:
                 resultados['diferenca_valor'],
                 resultados['custos_totais'],
                 resultados['custo_final'],
-                observacoes
+                observacoes,
+                dados_calculo.get('gelo_insumo_id'),
+                dados_calculo.get('papelao_insumo_id'),
+                dados_calculo.get('fita_insumo_id'),
+                dados_calculo.get('embalagem_id'),
+                dados_calculo.get('embalagem_qtd'),
             ))
             
             calculo_id = cursor.lastrowid

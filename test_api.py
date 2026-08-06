@@ -273,17 +273,21 @@ def test_editar_permissoes_e_anti_lockout(client):
     assert client.put(f'/api/usuarios/{uid_admin}', json={'papel': 'leitura'}, headers=A).status_code == 400
 
 
-# --- Tipos de embalagem ----------------------------------------------------
+# --- Insumos (catálogo: gelo, papelão, fita, embalagem) --------------------
 
-def test_embalagem_crud_e_vinculo(client):
+def test_insumo_crud_e_vinculo_embalagem(client):
     A = auth(token_admin(client))
-    # criar
-    r = client.post('/api/embalagens', json={'nome': 'Caixa 5kg', 'valor': 2.5}, headers=A)
+    # criar um insumo de embalagem
+    r = client.post('/api/insumos', json={'nome': 'Caixa 5kg', 'valor': 2.5, 'categoria': 'embalagem'}, headers=A)
     assert r.status_code == 201
-    eid = r.get_json()['embalagem_id']
-    # nome duplicado -> 400
-    assert client.post('/api/embalagens', json={'nome': 'Caixa 5kg', 'valor': 9}, headers=A).status_code == 400
-    # vincular a um produto e conferir que volta no JOIN
+    eid = r.get_json()['insumo_id']
+    # nome duplicado na MESMA categoria -> 400
+    assert client.post('/api/insumos', json={'nome': 'Caixa 5kg', 'valor': 9, 'categoria': 'embalagem'}, headers=A).status_code == 400
+    # mesmo nome em OUTRA categoria -> permitido
+    assert client.post('/api/insumos', json={'nome': 'Caixa 5kg', 'valor': 9, 'categoria': 'papelao'}, headers=A).status_code == 201
+    # categoria inválida -> 400
+    assert client.post('/api/insumos', json={'nome': 'Y', 'valor': 1, 'categoria': 'foo'}, headers=A).status_code == 400
+    # vincular a um produto e conferir que o nome/valor voltam no JOIN (com insumos!)
     client.post('/api/produtos', json={'nome': 'Tilapia', 'preco_kg': 20}, headers=A)
     pid = [p for p in client.get('/api/produtos', headers=A).get_json()['produtos']
            if p['nome'] == 'Tilapia'][0]['id']
@@ -291,18 +295,56 @@ def test_embalagem_crud_e_vinculo(client):
     prod = [p for p in client.get('/api/produtos', headers=A).get_json()['produtos'] if p['id'] == pid][0]
     assert prod['embalagem_nome'] == 'Caixa 5kg'
     assert prod['embalagem_valor'] == 2.5
-    # remover a embalagem -> o produto fica sem embalagem (NULL)
-    assert client.delete(f'/api/embalagens/{eid}', headers=A).status_code == 200
+    # remover o insumo -> o produto fica sem embalagem (NULL)
+    assert client.delete(f'/api/insumos/{eid}', headers=A).status_code == 200
     prod = [p for p in client.get('/api/produtos', headers=A).get_json()['produtos'] if p['id'] == pid][0]
     assert prod['embalagem_nome'] is None
 
 
-def test_embalagem_exige_permissao_produtos(client):
+def test_insumo_exige_permissao_produtos(client):
     tok = api.serializer.dumps({'uid': 2, 'papel': 'leitura', 'permissoes': []})
     H = auth(tok)
-    # sem permissão de produtos -> não cria embalagem, mas pode LER
-    assert client.post('/api/embalagens', json={'nome': 'X', 'valor': 1}, headers=H).status_code == 403
-    assert client.get('/api/embalagens', headers=H).status_code == 200
+    # sem permissão de produtos -> não cria insumo, mas pode LER
+    assert client.post('/api/insumos', json={'nome': 'X', 'valor': 1, 'categoria': 'gelo'}, headers=H).status_code == 403
+    assert client.get('/api/insumos', headers=H).status_code == 200
+
+
+def test_tipo_insumo_afeta_custo_salvo(client):
+    """Regressão do fix nº 1: escolher um tipo muda o custo salvo (caminho online)."""
+    A = auth(token_admin(client))
+    # Fixa o preço-padrão de gelo, para o teste não depender da ordem (outro teste
+    # altera essa config no mesmo banco compartilhado).
+    client.put('/api/configuracoes', json={'preco_gelo': 8.5}, headers=A)
+    gid = client.post('/api/insumos', json={'nome': 'Gelo caro', 'valor': 20, 'categoria': 'gelo'},
+                      headers=A).get_json()['insumo_id']
+    base = {'produto': 'P', 'categoria': 'Mercado', 'preco': 10, 'peso_inicial': 100,
+            'peso_final': 115, 'sacos_de_gelo': 2, 'caixa_papelao': 1}
+    # sem tipo -> preço padrão (8,5) -> 2*8,5 = 17
+    r = client.post('/api/calculos', json=base, headers=A).get_json()
+    assert r['resultados']['custo_sacos_gelo'] == 17.0
+    # com o tipo caro -> 2*20 = 40
+    r = client.post('/api/calculos', json={**base, 'gelo_insumo_id': gid}, headers=A).get_json()
+    assert r['resultados']['custo_sacos_gelo'] == 40.0
+
+
+def test_admin_reseta_2fa(client):
+    """Regressão do fix nº 3: o admin consegue resetar o 2FA de um usuário."""
+    import pyotp
+    A = auth(token_admin(client))
+    client.post('/api/usuarios', json={'nome': 'R', 'email': 'r@x.com',
+                'senha': 'segredo123', 'papel': 'leitura'}, headers=A)
+    j = client.post('/api/login', json={'email': 'r@x.com', 'senha': 'segredo123'}).get_json()
+    seg = api.db.obter_usuario_por_email('r@x.com')['totp_secret']
+    client.post('/api/login/2fa', json={'pre_token': j['pre_token'], 'codigo': pyotp.TOTP(seg).now()})
+    assert api.db.obter_usuario_por_email('r@x.com')['totp_confirmado'] == 1
+    uid = api.db.obter_usuario_por_email('r@x.com')['id']
+    # admin reseta
+    assert client.post(f'/api/usuarios/{uid}/reset-2fa', headers=A).status_code == 200
+    u = api.db.obter_usuario_por_email('r@x.com')
+    assert u['totp_confirmado'] == 0 and u['totp_secret'] is None
+    # próximo login volta a ser setup
+    j2 = client.post('/api/login', json={'email': 'r@x.com', 'senha': 'segredo123'}).get_json()
+    assert j2.get('needs_2fa_setup') is True
 
 
 # --- Lotes -----------------------------------------------------------------

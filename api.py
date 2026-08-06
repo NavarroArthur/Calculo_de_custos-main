@@ -560,6 +560,21 @@ def atualizar_usuario(usuario_id):
         log_erro('Erro ao atualizar usuário', e)
         return jsonify({'error': 'Erro ao atualizar usuário'}), 500
 
+@app.route('/api/usuarios/<int:usuario_id>/reset-2fa', methods=['POST'])
+@exige_admin
+def resetar_2fa_usuario(usuario_id):
+    """Reseta o 2FA de um usuário (só admin). Usado quando alguém perde o app
+    autenticador e os códigos de backup. No próximo login, a pessoa configura de
+    novo. É uma ação sensível — por isso fica registrada nos logs."""
+    try:
+        db.resetar_2fa(usuario_id)
+        ip, ua = _req_ip_ua()
+        db.registrar_log(g.usuario_id, '2fa_resetado', f'2FA do usuário {usuario_id} resetado', ip, ua)
+        return jsonify({'success': True})
+    except Exception as e:
+        log_erro('Erro ao resetar 2FA', e)
+        return jsonify({'error': 'Erro ao resetar 2FA'}), 500
+
 @app.route('/api/calculos', methods=['POST'])
 def salvar_calculo():
     """Salvar novo cálculo"""
@@ -590,6 +605,13 @@ def salvar_calculo():
         
         # Embalagem opcional: valor vem do banco (confiavel), quantidade do cliente.
         preco_embalagem, qtd_embalagem = _dados_embalagem(data)
+
+        # Registra QUAL tipo de insumo foi usado (rastreabilidade + histórico fiel).
+        dados_calculo['gelo_insumo_id'] = _para_int_opcional(data.get('gelo_insumo_id'))
+        dados_calculo['papelao_insumo_id'] = _para_int_opcional(data.get('papelao_insumo_id'))
+        dados_calculo['fita_insumo_id'] = _para_int_opcional(data.get('fita_insumo_id'))
+        dados_calculo['embalagem_id'] = _para_int_opcional(data.get('embalagem_id'))
+        dados_calculo['embalagem_qtd'] = qtd_embalagem
 
         # Calcular resultados (usando a fonte unica: calculos.py)
         resultados = calcular_resultados(
@@ -848,65 +870,8 @@ def remover_insumo(insumo_id):
         log_erro('Erro ao remover insumo', e)
         return jsonify({'error': 'Erro ao remover insumo'}), 500
 
-# ---------------------------------------------------------------------------
-# Tipos de embalagem (nome + valor). Ler: qualquer usuário logado (para o select
-# do perfil). Criar/editar/apagar: quem tem a permissão 'produtos'.
-# ---------------------------------------------------------------------------
-@app.route('/api/embalagens', methods=['GET'])
-def listar_embalagens():
-    try:
-        return jsonify({'success': True, 'embalagens': db.listar_embalagens()})
-    except Exception as e:
-        log_erro('Erro ao listar embalagens', e)
-        return jsonify({'error': 'Erro ao listar embalagens'}), 500
-
-@app.route('/api/embalagens', methods=['POST'])
-@exige_permissao('produtos')
-def criar_embalagem():
-    try:
-        data = request.get_json(silent=True) or {}
-        nome = (data.get('nome') or '').strip()
-        if not nome:
-            return jsonify({'error': 'Nome da embalagem é obrigatório'}), 400
-        valor = float(data.get('valor') or 0)
-        if valor < 0:
-            return jsonify({'error': 'O valor não pode ser negativo'}), 400
-        eid = db.criar_embalagem(nome, valor)
-        return jsonify({'success': True, 'embalagem_id': eid}), 201
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
-    except Exception as e:
-        log_erro('Erro ao criar embalagem', e)
-        return jsonify({'error': 'Erro ao criar embalagem'}), 500
-
-@app.route('/api/embalagens/<int:embalagem_id>', methods=['PUT'])
-@exige_permissao('produtos')
-def atualizar_embalagem(embalagem_id):
-    try:
-        data = request.get_json(silent=True) or {}
-        nome = (data.get('nome') or '').strip()
-        if not nome:
-            return jsonify({'error': 'Nome da embalagem é obrigatório'}), 400
-        valor = float(data.get('valor') or 0)
-        if valor < 0:
-            return jsonify({'error': 'O valor não pode ser negativo'}), 400
-        db.atualizar_embalagem(embalagem_id, nome, valor)
-        return jsonify({'success': True})
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
-    except Exception as e:
-        log_erro('Erro ao atualizar embalagem', e)
-        return jsonify({'error': 'Erro ao atualizar embalagem'}), 500
-
-@app.route('/api/embalagens/<int:embalagem_id>', methods=['DELETE'])
-@exige_permissao('produtos')
-def remover_embalagem(embalagem_id):
-    try:
-        db.remover_embalagem(embalagem_id)
-        return jsonify({'success': True})
-    except Exception as e:
-        log_erro('Erro ao remover embalagem', e)
-        return jsonify({'error': 'Erro ao remover embalagem'}), 500
+# (As rotas /api/embalagens foram removidas: embalagem agora é uma categoria do
+#  catálogo de insumos, gerenciada por /api/insumos?categoria=embalagem.)
 
 @app.route('/api/produtos/<int:produto_id>', methods=['GET'])
 def obter_produto(produto_id):
@@ -1112,6 +1077,15 @@ def exportar_dados():
         app.logger.error(f'Erro ao exportar dados: {e}')
         return jsonify({'error': 'Erro ao exportar dados'}), 500
 
+def _para_int_opcional(valor):
+    """Converte para int, ou None se vazio/inválido. Usado para guardar ids de
+    insumo (que podem vir vazios do cliente) sem estourar."""
+    try:
+        return int(valor) if valor not in (None, '', 0, '0') else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _preco_insumo(insumo_id, categoria, chave_padrao):
     """Resolve o PREÇO de um espaço fixo da calculadora (gelo/papelão/fita).
     Se o cliente enviou um insumo_id válido DAQUELA categoria, usa o valor do
@@ -1146,61 +1120,9 @@ def _dados_embalagem(data):
     return float(emb['valor']), qtd
 
 
-@app.route('/api/calcular', methods=['POST'])
-def calcular_beneficiamento():
-    """Calcular beneficiamento sem salvar no banco"""
-    try:
-        data = request.get_json()
-        
-        # Validações
-        campos_obrigatorios = ['produto', 'categoria', 'preco', 
-                              'peso_inicial', 'peso_final', 'sacos_de_gelo', 'caixa_papelao']
-        
-        for campo in campos_obrigatorios:
-            if campo not in data:
-                return jsonify({'error': f'Campo {campo} é obrigatório'}), 400
-        
-        # Preparar dados
-        dados = {
-            'produto': data['produto'],
-            'categoria': data['categoria'],
-            'preco': float(data['preco']),
-            'peso_inicial': float(data['peso_inicial']),
-            'peso_final': float(data['peso_final']),
-            'sacos_de_gelo': int(data['sacos_de_gelo']),
-            'caixa_papelao': int(data['caixa_papelao'])
-        }
-        
-        # Embalagem opcional: valor vem do banco (confiavel), quantidade do cliente.
-        preco_embalagem, qtd_embalagem = _dados_embalagem(data)
-
-        # Calcular resultados (fonte unica: calculos.py).
-        # Validacoes de peso/preco vivem dentro de calcular_resultados (levanta ValueError).
-        resultados = calcular_resultados(
-            preco=dados['preco'],
-            peso_inicial=dados['peso_inicial'],
-            peso_final=dados['peso_final'],
-            sacos_de_gelo=dados['sacos_de_gelo'],
-            caixa_papelao=dados['caixa_papelao'],
-            preco_gelo=_preco_insumo(data.get('gelo_insumo_id'), 'gelo', 'preco_gelo'),
-            preco_papelao=_preco_insumo(data.get('papelao_insumo_id'), 'papelao', 'preco_papelao'),
-            preco_fita=_preco_insumo(data.get('fita_insumo_id'), 'fita', 'preco_fita'),
-            preco_venda=float(data['preco_venda']) if data.get('preco_venda') else None,
-            preco_embalagem=preco_embalagem, qtd_embalagem=qtd_embalagem,
-        )
-
-        return jsonify({
-            'success': True,
-            'dados': dados,
-            'resultados': resultados,
-            'timestamp': datetime.now().isoformat()
-        })
-        
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
-    except Exception as e:
-        app.logger.error(f'Erro ao calcular: {e}')
-        return jsonify({'error': 'Erro ao calcular'}), 500
+# (A rota /api/calcular — calcular sem salvar — foi removida: o front sempre salva
+#  via POST /api/calculos, e o cálculo sem gravar já existe no fallback offline do
+#  navegador. Isso também eliminou a duplicação da lógica que havia com salvar_calculo.)
 
 @app.errorhandler(404)
 def not_found(error):
@@ -1248,7 +1170,6 @@ if __name__ == '__main__':
     print(f"   • POST /api/usuarios - Criar usuário")
     print(f"   • POST /api/calculos - Salvar cálculo")
     print(f"   • GET  /api/calculos - Listar todos os cálculos")
-    print(f"   • POST /api/calcular - Calcular sem salvar")
     print(f"   • GET  /api/estatisticas - Estatísticas do sistema")
     print(f"   • GET  /api/configuracoes - Configurações")
     print(f"   • GET  /api/exportar - Exportar dados")

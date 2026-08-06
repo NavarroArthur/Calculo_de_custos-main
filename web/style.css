@@ -1627,7 +1627,9 @@ select:focus-visible {
 .embalagem-item { display: flex; align-items: center; gap: 8px; }
 .embalagem-item .emb-nome { flex: 1 1 auto; }
 .embalagem-item .emb-valor { width: 110px; flex: 0 0 auto; }
-.btn-produto.btn-excluir { color: var(--error-color); }
+/* (Removida a regra que deixava o texto/ícone do botão excluir vermelho: como o
+   fundo do .btn-excluir já é vermelho, o conteúdo ficava vermelho-no-vermelho,
+   invisível. Agora vale o branco herdado de .btn-produto — bom contraste.) */
 
 /* Catálogo de insumos (aba Insumos): mesma aparência da lista de embalagens */
 .insumos-lista { display: flex; flex-direction: column; gap: 8px; margin: 0.75rem 0; }

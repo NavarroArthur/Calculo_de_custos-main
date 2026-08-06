@@ -1629,6 +1629,21 @@ select:focus-visible {
 .embalagem-item .emb-valor { width: 110px; flex: 0 0 auto; }
 .btn-produto.btn-excluir { color: var(--error-color); }
 
+/* Catálogo de insumos (aba Insumos): mesma aparência da lista de embalagens */
+.insumos-lista { display: flex; flex-direction: column; gap: 8px; margin: 0.75rem 0; }
+.insumo-item { display: flex; align-items: center; gap: 8px; }
+.insumo-item .ins-nome { flex: 1 1 auto; }
+.insumo-item .ins-valor { width: 110px; flex: 0 0 auto; }
+
+/* 2FA no login */
+.login-hint { font-size: 0.9rem; color: var(--text-secondary, #64748b); margin: 0.5rem 0; line-height: 1.4; }
+.twofa-qr { display: flex; justify-content: center; margin: 0.75rem 0; }
+.twofa-qr img, .twofa-qr canvas { border: 6px solid #fff; border-radius: 8px; }
+#twofaSecret { font-family: monospace; font-size: 1rem; letter-spacing: 1px; word-break: break-all; }
+.backup-codes { list-style: none; padding: 0.75rem; margin: 0.5rem 0; display: grid;
+    grid-template-columns: 1fr 1fr; gap: 6px; background: var(--bg-secondary, #f1f5f9); border-radius: 8px; }
+.backup-codes li { font-family: monospace; font-size: 1rem; text-align: center; letter-spacing: 1px; }
+
 /* Lotes no perfil do produto */
 .lotes-section { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--border-color, #e5e7eb); }
 .lotes-section h4 { margin: 0 0 0.5rem; font-size: 1rem; }
@@ -2119,3 +2134,6 @@ select:focus-visible {
     /* No celular, o calendario ocupa um pouco mais de largura (dias maiores). */
     .dp-popup { width: 19rem; }
 }
+
+/* Dica curta abaixo de um campo (ex.: regra do peso final) */
+.campo-hint { display: block; margin-top: 4px; font-size: 0.75rem; color: var(--text-secondary); }

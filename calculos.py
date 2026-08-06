@@ -22,7 +22,8 @@ def calcular_resultados(preco, peso_inicial, peso_final,
                         preco_gelo=PRECO_GELO_PADRAO,
                         preco_papelao=PRECO_PAPELAO_PADRAO,
                         preco_fita=PRECO_FITA_PADRAO,
-                        preco_venda=None):
+                        preco_venda=None,
+                        preco_embalagem=0.0, qtd_embalagem=0):
     """
     Calcula todos os custos do beneficiamento e devolve um dicionario.
 
@@ -53,7 +54,10 @@ def calcular_resultados(preco, peso_inicial, peso_final,
     custo_sacos_gelo = sacos_de_gelo * preco_gelo
     custo_papelao = caixa_papelao * preco_papelao
     custo_fita_papelao = caixa_papelao * preco_fita
-    custos_totais = custo_sacos_gelo + custo_papelao + custo_fita_papelao
+    # Embalagem (opcional): quantidade escolhida x valor unitario da embalagem.
+    # Se nao houver embalagem (qtd=0 ou valor=0), o custo e zero e nada muda.
+    custo_embalagem = qtd_embalagem * preco_embalagem
+    custos_totais = custo_sacos_gelo + custo_papelao + custo_fita_papelao + custo_embalagem
 
     # Custos da producao
     diferenca_pesos = peso_final - peso_inicial
@@ -67,6 +71,7 @@ def calcular_resultados(preco, peso_inicial, peso_final,
         "custo_sacos_gelo": custo_sacos_gelo,
         "custo_papelao": custo_papelao,
         "custo_fita_papelao": custo_fita_papelao,
+        "custo_embalagem": custo_embalagem,
         "diferenca_pesos": diferenca_pesos,
         "custo_producao": custo_producao,
         "custo_pos_beneficiamento": custo_pos_beneficiamento,
@@ -77,10 +82,16 @@ def calcular_resultados(preco, peso_inicial, peso_final,
     }
 
     # Margem de lucro (opcional): so calcula se o preco de venda foi informado.
-    # lucro por Kg = quanto voce vende menos quanto custa o Kg apos o beneficiamento.
+    # O lucro e medido contra o custo CHEIO por Kg: materia-prima + TODOS os insumos
+    # (gelo, papelao, fita, embalagem), diluidos no peso final. Assim os insumos
+    # realmente pesam na rentabilidade (antes o lucro so olhava a materia-prima).
+    #   custo_total_por_kg = custo_final / peso_final
+    # (peso_final ja foi validado > 0 la em cima, entao nao ha divisao por zero.)
     if preco_venda is not None and preco_venda > 0:
-        lucro_por_kg = preco_venda - custo_pos_beneficiamento
+        custo_total_por_kg = custo_final / peso_final
+        lucro_por_kg = preco_venda - custo_total_por_kg
         resultado["preco_venda"] = preco_venda
+        resultado["custo_total_por_kg"] = custo_total_por_kg
         resultado["lucro_por_kg"] = lucro_por_kg
         resultado["margem_percentual"] = (lucro_por_kg / preco_venda) * 100
 

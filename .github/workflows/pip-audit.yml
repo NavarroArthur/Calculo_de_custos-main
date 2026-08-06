@@ -1,0 +1,33 @@
+name: Auditoria de dependências (pip-audit)
+
+# Audita as bibliotecas Python contra o banco de vulnerabilidades conhecidas.
+# Roda a cada push/PR e também toda segunda-feira (para pegar CVEs novos que
+# surgem DEPOIS do merge, sem precisar de um push).
+on:
+  push:
+    branches: [main]
+    paths: ['requirements.txt', '.github/workflows/pip-audit.yml']
+  pull_request:
+    paths: ['requirements.txt', '.github/workflows/pip-audit.yml']
+  schedule:
+    - cron: '0 6 * * 1'   # toda segunda, 06:00 UTC
+  workflow_dispatch:       # permite rodar manualmente pelo botão "Run workflow"
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v4
+
+      - name: Preparar o Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar o pip-audit
+        run: pip install pip-audit
+
+      - name: Auditar as dependências
+        # Falha o job se encontrar vulnerabilidade conhecida em alguma dependência.
+        run: pip-audit -r requirements.txt --strict

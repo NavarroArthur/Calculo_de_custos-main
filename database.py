@@ -38,8 +38,8 @@ class DatabaseManager:
         para garantir num LUGAR SÓ (princípio DRY) quatro coisas importantes:
 
           - timeout=30: se o banco estiver ocupado por outra escrita, espera até 30s
-            em vez de estourar na hora com "database is locked" (importante com os 2
-            workers do gunicorn).
+            em vez de estourar na hora com "database is locked" (importante quando há
+            mais de um processo do servidor acessando o mesmo banco).
           - PRAGMA foreign_keys = ON: o SQLite IGNORA as FOREIGN KEY por padrão. Este
             PRAGMA é POR CONEXÃO, então precisa ser ligado toda vez. Sem ele, dá pra
             inserir um cálculo com usuario_id inexistente. Com ele, o banco garante a
@@ -177,6 +177,24 @@ class DatabaseManager:
                 )
             ''')
 
+            # Tabela UNIFICADA de insumos (catálogo). Substitui os preços fixos únicos
+            # (gelo/papelão/fita, que viviam em 'configuracoes') e as 'embalagens' por
+            # um único cadastro: cada linha é um TIPO de insumo, com nome, valor e a
+            # CATEGORIA que diz onde ele entra no cálculo ('gelo', 'papelao', 'fita',
+            # 'embalagem', ...). Assim dá pra ter vários tipos de caixa, de gelo, etc.
+            # A calculadora, em cada espaço fixo, mostra só os insumos daquela categoria.
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS insumos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nome TEXT NOT NULL,
+                    valor REAL NOT NULL DEFAULT 0,
+                    categoria TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (nome, categoria)
+                )
+            ''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_insumos_categoria ON insumos(categoria)')
+
             # Tabela de LOTES: cada produto pode ter vários lotes (partidas), e cada
             # lote tem o seu próprio código, fabricação, validade e quantidade. É isto
             # que dá o controle de perecível (dois lotes com validades diferentes).
@@ -202,11 +220,13 @@ class DatabaseManager:
             self._migrar_usuarios_papel(cursor)
             # Migração: adiciona a coluna de permissoes (abas liberadas por usuário)
             self._migrar_usuarios_permissoes(cursor)
+            # Migração: colunas de 2FA (segredo TOTP + se já foi confirmado)
+            self._migrar_usuarios_2fa(cursor)
 
             # Tabela para o controle de tentativas de login (rate limiting).
             # Fica no banco (e não na memória do processo) para ser COMPARTILHADA
-            # entre os vários workers do gunicorn. Se ficasse na memória, cada
-            # worker teria a sua própria contagem e o limite não valeria de verdade.
+            # entre os vários processos do servidor. Se ficasse na memória, cada
+            # processo teria a sua própria contagem e o limite não valeria de verdade.
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS login_tentativas (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -217,8 +237,27 @@ class DatabaseManager:
             cursor.execute(
                 'CREATE INDEX IF NOT EXISTS idx_login_tentativas_ip ON login_tentativas(ip)')
 
+            # Códigos de backup do 2FA: entradas de uso único caso o usuário perca o
+            # app autenticador. Guardamos só o HASH de cada código (nunca o texto),
+            # igual às senhas. A coluna 'usado' marca quando um código foi consumido.
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS backup_codes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    usuario_id INTEGER NOT NULL,
+                    code_hash TEXT NOT NULL,
+                    usado INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (usuario_id) REFERENCES usuarios (id)
+                )
+            ''')
+            cursor.execute(
+                'CREATE INDEX IF NOT EXISTS idx_backup_codes_usuario ON backup_codes(usuario_id)')
+
             # Inserir configurações padrão
             self._insert_default_configurations(cursor)
+            # Migração única: monta o catálogo de insumos a partir do que já existe
+            # (preços fixos de gelo/papelão/fita + embalagens já cadastradas).
+            self._migrar_insumos(cursor)
             # Inserir produtos padrão (só entram na primeira vez)
             self._insert_default_produtos(cursor)
             # Migração única: unifica os históricos antigos (preços/validades) no novo formato
@@ -253,7 +292,7 @@ class DatabaseManager:
         configuracoes_padrao = [
             ('preco_gelo', '8.5', 'Preço unitário dos sacos de gelo'),
             ('preco_papelao', '7.3', 'Preço unitário das caixas de papelão'),
-            ('preco_fita', '0.34', 'Preço unitário das fitas durex'),
+            ('preco_fita', '0.34', 'Preço unitário da fita adesiva'),
             ('versao_sistema', '2.0.0', 'Versão atual do sistema'),
             ('max_calculos_historico', '1000', 'Máximo de cálculos no histórico'),
             ('backup_automatico', 'true', 'Ativar backup automático'),
@@ -365,12 +404,70 @@ class DatabaseManager:
             "INSERT OR REPLACE INTO configuracoes (chave, valor, descricao) "
             "VALUES ('migrou_lotes_iniciais', 'true', 'Lotes iniciais ja migrados')")
 
+    def _migrar_insumos(self, cursor):
+        """Migração ÚNICA: monta o catálogo de insumos a partir do que já existe,
+        para não perder nada e manter o comportamento atual.
+
+        Faz, em ordem:
+          1) Copia as embalagens já cadastradas para 'insumos' com categoria
+             'embalagem', PRESERVANDO O ID de cada uma. Isso é de propósito: os
+             produtos apontam para a embalagem por produtos.embalagem_id, então
+             manter o mesmo id deixa esse vínculo válido no novo modelo.
+          2) Cria o primeiro tipo de cada insumo fixo (gelo/papelão/fita) usando o
+             preço que hoje vive em 'configuracoes'. Assim os três preços fixos de
+             antes viram o item padrão de cada categoria, e os cálculos antigos
+             continuam batendo.
+        Guardada por flag para nunca rodar duas vezes.
+        """
+        cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'migrou_insumos'")
+        if cursor.fetchone():
+            return
+
+        # 1) Embalagens existentes -> insumos (mesmo id, categoria 'embalagem')
+        cursor.execute('SELECT id, nome, valor FROM embalagens ORDER BY id')
+        for eid, nome, valor in cursor.fetchall():
+            cursor.execute(
+                'INSERT OR IGNORE INTO insumos (id, nome, valor, categoria) '
+                "VALUES (?, ?, ?, 'embalagem')", (eid, nome, valor))
+
+        # 2) Preços fixos de hoje -> item padrão de cada categoria
+        padroes = [
+            ('preco_gelo', 'Gelo padrão', 'gelo'),
+            ('preco_papelao', 'Caixa de papelão padrão', 'papelao'),
+            ('preco_fita', 'Fita padrão', 'fita'),
+        ]
+        for chave, nome, categoria in padroes:
+            cursor.execute('SELECT valor FROM configuracoes WHERE chave = ?', (chave,))
+            row = cursor.fetchone()
+            valor = float(row[0]) if row and row[0] not in (None, '') else 0.0
+            cursor.execute(
+                'INSERT OR IGNORE INTO insumos (nome, valor, categoria) VALUES (?, ?, ?)',
+                (nome, valor, categoria))
+
+        cursor.execute(
+            "INSERT OR REPLACE INTO configuracoes (chave, valor, descricao) "
+            "VALUES ('migrou_insumos', 'true', 'Catalogo de insumos ja migrado')")
+
     def _migrar_usuarios_senha(self, cursor):
         """Adiciona a coluna senha_hash na tabela usuarios, se ainda não existir."""
         cursor.execute('PRAGMA table_info(usuarios)')
         existentes = {linha[1] for linha in cursor.fetchall()}
         if 'senha_hash' not in existentes:
             cursor.execute('ALTER TABLE usuarios ADD COLUMN senha_hash TEXT')
+
+    def _migrar_usuarios_2fa(self, cursor):
+        """Adiciona as colunas de 2FA na tabela usuarios, se ainda não existirem:
+          - totp_secret: o segredo base32 do autenticador (por usuário);
+          - totp_confirmado: 0/1, se o usuário já concluiu o enrolamento do 2FA.
+        Usuários antigos nascem com secret nulo e confirmado=0 -> no próximo login
+        são levados a configurar o 2FA (que é obrigatório para todos)."""
+        cursor.execute('PRAGMA table_info(usuarios)')
+        existentes = {linha[1] for linha in cursor.fetchall()}
+        if 'totp_secret' not in existentes:
+            cursor.execute('ALTER TABLE usuarios ADD COLUMN totp_secret TEXT')
+        if 'totp_confirmado' not in existentes:
+            cursor.execute(
+                'ALTER TABLE usuarios ADD COLUMN totp_confirmado INTEGER NOT NULL DEFAULT 0')
 
     def _migrar_usuarios_papel(self, cursor):
         """Adiciona a coluna 'papel' na tabela usuarios (controle de acesso / RBAC).
@@ -398,16 +495,92 @@ class DatabaseManager:
     # Autenticação e backup
     # ----------------------------------------------------------------------
     def obter_usuario_por_email(self, email: str):
-        """Retorna o usuário (id, nome, email, senha_hash, papel) pelo e-mail, ou None."""
+        """Retorna o usuário (id, nome, email, senha_hash, papel, 2FA) pelo e-mail, ou None."""
         conn = self._conectar()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         try:
             cursor.execute(
-                'SELECT id, nome, email, senha_hash, papel, permissoes FROM usuarios WHERE email = ?',
+                'SELECT id, nome, email, senha_hash, papel, permissoes, '
+                'totp_secret, totp_confirmado FROM usuarios WHERE email = ?',
                 (email,))
             row = cursor.fetchone()
             return dict(row) if row else None
+        finally:
+            conn.close()
+
+    # ----------------------------------------------------------------------
+    # 2FA (TOTP) — segredo por usuário + códigos de backup de uso único
+    # ----------------------------------------------------------------------
+    def obter_totp(self, usuario_id: int):
+        """Retorna (totp_secret, totp_confirmado) do usuário, ou None se não existir."""
+        conn = self._conectar()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                'SELECT totp_secret, totp_confirmado FROM usuarios WHERE id = ?', (usuario_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def definir_totp_secret(self, usuario_id: int, secret: str):
+        """Guarda o segredo TOTP e marca como NÃO confirmado (só confirma quando o
+        usuário digita um código válido pela primeira vez)."""
+        conn = self._conectar()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                'UPDATE usuarios SET totp_secret = ?, totp_confirmado = 0 WHERE id = ?',
+                (secret, usuario_id))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def confirmar_totp(self, usuario_id: int):
+        """Marca o 2FA do usuário como confirmado (enrolamento concluído)."""
+        conn = self._conectar()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('UPDATE usuarios SET totp_confirmado = 1 WHERE id = ?', (usuario_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def salvar_backup_codes(self, usuario_id: int, hashes):
+        """Substitui os códigos de backup do usuário pelos novos (guardando só o HASH).
+        Chamado no enrolamento; apaga os antigos para não acumular."""
+        conn = self._conectar()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('DELETE FROM backup_codes WHERE usuario_id = ?', (usuario_id,))
+            cursor.executemany(
+                'INSERT INTO backup_codes (usuario_id, code_hash) VALUES (?, ?)',
+                [(usuario_id, h) for h in hashes])
+            conn.commit()
+        finally:
+            conn.close()
+
+    def listar_hashes_backup_nao_usados(self, usuario_id: int):
+        """Retorna [(id, code_hash)] dos códigos de backup ainda não usados do usuário."""
+        conn = self._conectar()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                'SELECT id, code_hash FROM backup_codes WHERE usuario_id = ? AND usado = 0',
+                (usuario_id,))
+            return cursor.fetchall()
+        finally:
+            conn.close()
+
+    def marcar_backup_code_usado(self, code_id: int):
+        """Marca um código de backup como usado (uso único)."""
+        conn = self._conectar()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('UPDATE backup_codes SET usado = 1 WHERE id = ?', (code_id,))
+            conn.commit()
         finally:
             conn.close()
 
@@ -583,6 +756,20 @@ class DatabaseManager:
         finally:
             conn.close()
 
+    def obter_embalagem(self, embalagem_id: int):
+        """Retorna uma embalagem (id, nome, valor) pelo id, ou None se nao existir.
+        Usado pelo calculo para pegar o VALOR no servidor (fonte confiavel), em vez
+        de confiar no valor enviado pelo cliente."""
+        conn = self._conectar()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        try:
+            cursor.execute('SELECT id, nome, valor FROM embalagens WHERE id = ?', (embalagem_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
     def criar_embalagem(self, nome: str, valor: float = 0) -> int:
         """Cria um tipo de embalagem. Levanta ValueError se o nome já existir."""
         conn = self._conectar()
@@ -620,6 +807,89 @@ class DatabaseManager:
             cursor.execute('UPDATE produtos SET embalagem_id = NULL WHERE embalagem_id = ?',
                            (embalagem_id,))
             cursor.execute('DELETE FROM embalagens WHERE id = ?', (embalagem_id,))
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            conn.close()
+
+    # ----------------------------------------------------------------------
+    # Insumos (catálogo unificado: gelo, papelão, fita, embalagem, ...)
+    # ----------------------------------------------------------------------
+    def listar_insumos(self, categoria: str = None):
+        """Lista os insumos do catálogo, opcionalmente filtrando por categoria.
+        Ordena por categoria e nome (bom para agrupar na tela e nos selects)."""
+        conn = self._conectar()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        try:
+            if categoria:
+                cursor.execute(
+                    'SELECT id, nome, valor, categoria FROM insumos '
+                    'WHERE categoria = ? ORDER BY nome', (categoria,))
+            else:
+                cursor.execute(
+                    'SELECT id, nome, valor, categoria FROM insumos '
+                    'ORDER BY categoria, nome')
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def obter_insumo(self, insumo_id: int):
+        """Retorna um insumo (id, nome, valor, categoria) pelo id, ou None.
+        Usado no cálculo para pegar o VALOR no servidor (fonte confiável), em vez
+        de confiar no valor enviado pelo cliente."""
+        conn = self._conectar()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                'SELECT id, nome, valor, categoria FROM insumos WHERE id = ?', (insumo_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def criar_insumo(self, nome: str, valor: float, categoria: str) -> int:
+        """Cria um tipo de insumo numa categoria. Levanta ValueError se já existir
+        um insumo com o mesmo nome NAQUELA categoria (a unicidade é por par
+        nome+categoria, então dá para ter 'Padrão' em gelo e em papelão)."""
+        conn = self._conectar()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                'INSERT INTO insumos (nome, valor, categoria) VALUES (?, ?, ?)',
+                (nome, valor, categoria))
+            conn.commit()
+            return cursor.lastrowid
+        except sqlite3.IntegrityError:
+            raise ValueError('Já existe um insumo com esse nome nessa categoria')
+        finally:
+            conn.close()
+
+    def atualizar_insumo(self, insumo_id: int, nome: str, valor: float):
+        """Atualiza nome e valor de um insumo (a categoria não muda)."""
+        conn = self._conectar()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('UPDATE insumos SET nome = ?, valor = ? WHERE id = ?',
+                           (nome, valor, insumo_id))
+            conn.commit()
+            return cursor.rowcount
+        except sqlite3.IntegrityError:
+            raise ValueError('Já existe um insumo com esse nome nessa categoria')
+        finally:
+            conn.close()
+
+    def remover_insumo(self, insumo_id: int):
+        """Remove um insumo do catálogo. Se ele for uma embalagem em uso por algum
+        produto, desvincula antes (produtos.embalagem_id vira NULL), igual à regra
+        antiga de embalagens."""
+        conn = self._conectar()
+        cursor = conn.cursor()
+        try:
+            cursor.execute('UPDATE produtos SET embalagem_id = NULL WHERE embalagem_id = ?',
+                           (insumo_id,))
+            cursor.execute('DELETE FROM insumos WHERE id = ?', (insumo_id,))
             conn.commit()
             return cursor.rowcount
         finally:

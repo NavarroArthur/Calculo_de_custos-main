@@ -102,7 +102,7 @@ function atualizarUIFiltros(qtdResultados) {
         { id: 'filtroProduto',   rotulo: 'Produto',   exibir: valorDe('filtroProduto') },
         { id: 'filtroCategoria', rotulo: 'Categoria', exibir: valorDe('filtroCategoria') },
         { id: 'filtroDe',        rotulo: 'De',        exibir: formatarDataBR(valorDe('filtroDe')) },
-        { id: 'filtroAte',       rotulo: 'Ate',       exibir: formatarDataBR(valorDe('filtroAte')) },
+        { id: 'filtroAte',       rotulo: 'Até',       exibir: formatarDataBR(valorDe('filtroAte')) },
     ];
     // "Ativo" = o input tem algum valor. Um filtro vazio nao vira chip.
     const ativos = definicoes.filter(f => valorDe(f.id) !== '');

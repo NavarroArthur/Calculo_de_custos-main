@@ -34,7 +34,7 @@ function aplicarValidacoes() {
     // Validação de números positivos
     ['peso_inicial', 'peso_final', 'sacos_de_gelo', 'caixa_papelao'].forEach(campoId => {
         campos[campoId].addEventListener('input', function() {
-            const valor = parseInt(this.value);
+            const valor = parseFloat(this.value);
             if (valor && valor < 0) {
                 mostrarErro(this, 'Este valor deve ser maior ou igual a zero');
             } else {

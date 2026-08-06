@@ -155,7 +155,7 @@ def executar_calculo():
     print("\nDETALHES DOS CUSTOS:")
     print(f"R${r['custo_sacos_gelo']:.2f} em sacos de gelo")
     print(f"R${r['custo_papelao']:.2f} em caixas de papelao")
-    print(f"R${r['custo_fita_papelao']:.2f} em fitas durex")
+    print(f"R${r['custo_fita_papelao']:.2f} em fita adesiva")
     print(linha)
     print(f"\nBeneficiamento de {r['porcentagem']:.2f}%, aumento de {r['diferenca_pesos']} Kg "
           f"(de {peso_inicial} para {peso_final}).")

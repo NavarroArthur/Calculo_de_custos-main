@@ -44,9 +44,22 @@ def _limpar_rate_limit():
 
 
 def login(client, email=ADMIN_EMAIL, senha=ADMIN_SENHA):
-    """Faz login e devolve (status_code, json)."""
+    """Faz o login COMPLETO (senha + 2FA) e devolve (status_code, json) do passo final.
+
+    Como o 2FA é obrigatório, o login tem dois passos. Aqui, para o teste, lemos o
+    segredo TOTP direto do banco (temos acesso ao api.db) e geramos o código com
+    pyotp — exatamente o que o app autenticador do usuário faria. Serve tanto para o
+    primeiro login (setup) quanto para os seguintes (2FA já confirmado)."""
+    import pyotp
     r = client.post('/api/login', json={'email': email, 'senha': senha})
-    return r.status_code, r.get_json()
+    j = r.get_json() or {}
+    # Falha no 1º passo (senha errada, rate limit, etc.): devolve como está.
+    if r.status_code != 200 or 'pre_token' not in j:
+        return r.status_code, j
+    u = api.db.obter_usuario_por_email(email)
+    codigo = pyotp.TOTP(u['totp_secret']).now()
+    r2 = client.post('/api/login/2fa', json={'pre_token': j['pre_token'], 'codigo': codigo})
+    return r2.status_code, r2.get_json()
 
 
 def auth(token):
@@ -85,6 +98,54 @@ def test_rate_limit_bloqueia_apos_5(client):
         client.post('/api/login', json={'email': 'x@x.com', 'senha': 'errada'})
     r = client.post('/api/login', json={'email': 'x@x.com', 'senha': 'errada'})
     assert r.status_code == 429
+
+
+# --- 2FA (TOTP) obrigatório ------------------------------------------------
+
+def test_login_primeiro_passo_nao_entrega_sessao(client):
+    """Com a senha certa, o 1º passo NÃO devolve token de sessão: exige o 2FA."""
+    r = client.post('/api/login', json={'email': ADMIN_EMAIL, 'senha': ADMIN_SENHA})
+    j = r.get_json()
+    assert r.status_code == 200
+    assert 'token' not in j                       # sessão ainda não
+    assert 'pre_token' in j                        # só o token de pré-autenticação
+    assert j.get('needs_2fa_setup') or j.get('needs_2fa')
+
+
+def test_pre_token_nao_vale_como_sessao(client):
+    """O token do 1º passo não pode acessar rota protegida (senão pularia o 2FA)."""
+    j = client.post('/api/login', json={'email': ADMIN_EMAIL, 'senha': ADMIN_SENHA}).get_json()
+    assert client.get('/api/usuarios', headers=auth(j['pre_token'])).status_code == 401
+
+
+def test_2fa_codigo_errado_falha(client):
+    j = client.post('/api/login', json={'email': ADMIN_EMAIL, 'senha': ADMIN_SENHA}).get_json()
+    r = client.post('/api/login/2fa', json={'pre_token': j['pre_token'], 'codigo': '000000'})
+    assert r.status_code == 401
+
+
+def test_backup_code_uso_unico(client):
+    """No setup, o usuário recebe códigos de backup; cada um funciona só uma vez."""
+    import pyotp
+    A = auth(token_admin(client))
+    client.post('/api/usuarios', json={'nome': 'Bkp', 'email': 'bkp@x.com',
+                'senha': 'segredo123', 'papel': 'leitura'}, headers=A)
+    # setup do 2FA desse usuário -> recebe os códigos de backup
+    j = client.post('/api/login', json={'email': 'bkp@x.com', 'senha': 'segredo123'}).get_json()
+    seg = api.db.obter_usuario_por_email('bkp@x.com')['totp_secret']
+    r = client.post('/api/login/2fa', json={'pre_token': j['pre_token'],
+                    'codigo': pyotp.TOTP(seg).now()}).get_json()
+    codigo_backup = r['backup_codes'][0]
+    # 1º uso do código de backup: funciona
+    api.db.limpar_tentativas_login('127.0.0.1')
+    j2 = client.post('/api/login', json={'email': 'bkp@x.com', 'senha': 'segredo123'}).get_json()
+    assert client.post('/api/login/2fa',
+                       json={'pre_token': j2['pre_token'], 'codigo': codigo_backup}).status_code == 200
+    # 2º uso do MESMO código: rejeitado
+    api.db.limpar_tentativas_login('127.0.0.1')
+    j3 = client.post('/api/login', json={'email': 'bkp@x.com', 'senha': 'segredo123'}).get_json()
+    assert client.post('/api/login/2fa',
+                       json={'pre_token': j3['pre_token'], 'codigo': codigo_backup}).status_code == 401
 
 
 # --- Autenticação / autorização (RBAC) ------------------------------------

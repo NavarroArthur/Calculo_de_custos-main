@@ -28,11 +28,16 @@
     <link rel="icon" href="favicon.ico">
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
     <meta name="theme-color" content="#2f6bff">
-    <link rel="stylesheet" href="style.css?v=26">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=29">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet"
+          integrity="sha384-3B6NwesSXE7YJlcLI9RpRqGf2p/EgVH8BgoKTaUrmKNDkHPStTQ3EyoYjCGXaOTS" crossorigin="anonymous">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- jsPDF: unica dependencia de PDF (o html2pdf foi removido, nao era mais usado) -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
+            integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous"></script>
+    <!-- qrcodejs: gera o QR do 2FA no navegador (o segredo NAO sai da maquina) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"
+            integrity="sha384-3zSEDfvllQohrq0PHL1fOXJuC/jSOO34H46t6UQfobFOmxE5BpjjaIJY5F2/bMnU" crossorigin="anonymous"></script>
 </head>
 <body>
     <div class="app-container">
@@ -71,9 +76,9 @@
                             <i class="fas fa-fish" aria-hidden="true"></i>
                             Produtos
                         </button>
-                        <button class="nav-btn" data-tab="config" data-admin role="menuitem">
-                            <i class="fas fa-gear" aria-hidden="true"></i>
-                            Configurações
+                        <button class="nav-btn" data-tab="config" data-perm="produtos" role="menuitem">
+                            <i class="fas fa-boxes-stacked" aria-hidden="true"></i>
+                            Insumos
                         </button>
                         <button class="nav-btn" data-tab="logs" data-admin role="menuitem">
                             <i class="fas fa-clipboard-list" aria-hidden="true"></i>
@@ -114,8 +119,8 @@
                         </label>
                         <select id="produto" required>
                             <option value="">Selecione o produto</option>
-                            <option>Filé de merluza</option>
-                            <option>Filé de Panga Com</option>
+                            <option>Filé de Merluza</option>
+                            <option>Filé de Panga Comum</option>
                             <option>Filé de Panga Premium</option>
                             <option>Filé de Saithe</option>
                             <option>Filé de Polaca</option>
@@ -124,7 +129,7 @@
                             <option>Filé de Tilápia</option>
                             <option>Tentáculos de Lula</option>
                             <option>Anéis de Lula</option>
-                            <option>Camarão sete barbas</option>
+                            <option>Camarão Sete Barbas</option>
                         </select>
                     </div>
 
@@ -144,7 +149,7 @@
                         <div class="form-group">
                             <label for="preco">
                                 <i class="fas fa-dollar-sign" aria-hidden="true"></i>
-                                Preço por Kg (R$)
+                                Preço por kg (R$)
                             </label>
                             <!-- min/inputmode: barreiras NATIVAS do navegador, antes mesmo do JS -->
                             <div class="input-group tem-prefixo">
@@ -156,11 +161,11 @@
                         <div class="form-group">
                             <label for="peso_inicial">
                                 <i class="fas fa-weight" aria-hidden="true"></i>
-                                Peso Inicial (Kg)
+                                Peso Inicial (kg)
                             </label>
                             <div class="input-group tem-sufixo">
                                 <input type="number" id="peso_inicial" step="0.01" min="0.01" inputmode="decimal" placeholder="0.00" required>
-                                <span class="input-sufixo">Kg</span>
+                                <span class="input-sufixo">kg</span>
                             </div>
                         </div>
                     </div>
@@ -169,12 +174,13 @@
                         <div class="form-group">
                             <label for="peso_final">
                                 <i class="fas fa-weight-hanging" aria-hidden="true"></i>
-                                Peso Final (Kg)
+                                Peso Final (kg)
                             </label>
                             <div class="input-group tem-sufixo">
                                 <input type="number" id="peso_final" step="0.01" min="0.01" inputmode="decimal" placeholder="0.00" required>
-                                <span class="input-sufixo">Kg</span>
+                                <span class="input-sufixo">kg</span>
                             </div>
+                            <small class="campo-hint">Deve ser maior que o peso inicial.</small>
                         </div>
 
                         <div class="form-group">
@@ -194,10 +200,56 @@
                         <input type="number" id="caixa_papelao" min="0" inputmode="numeric" placeholder="0" required>
                     </div>
 
+                    <!-- Tipo de cada insumo (puxado do catálogo por categoria). As quantidades
+                         de gelo e de caixa vêm dos campos acima; a fita acompanha o nº de caixas. -->
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="gelo_insumo_id">
+                                <i class="fas fa-snowflake" aria-hidden="true"></i>
+                                Tipo de gelo
+                            </label>
+                            <select id="gelo_insumo_id"></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="papelao_insumo_id">
+                                <i class="fas fa-box" aria-hidden="true"></i>
+                                Tipo de caixa
+                            </label>
+                            <select id="papelao_insumo_id"></select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="fita_insumo_id">
+                            <i class="fas fa-tape" aria-hidden="true"></i>
+                            Tipo de fita <small>(1 por caixa de papelão)</small>
+                        </label>
+                        <select id="fita_insumo_id"></select>
+                    </div>
+
+                    <!-- Embalagem opcional: soma (quantidade x valor da embalagem) ao custo total -->
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="calc_embalagem">
+                                <i class="fas fa-box-open" aria-hidden="true"></i>
+                                Embalagem &mdash; opcional
+                            </label>
+                            <select id="calc_embalagem">
+                                <option value="">— Nenhuma —</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="calc_embalagem_qtd">
+                                <i class="fas fa-hashtag" aria-hidden="true"></i>
+                                Quantidade de embalagens
+                            </label>
+                            <input type="number" id="calc_embalagem_qtd" min="0" inputmode="numeric" placeholder="0">
+                        </div>
+                    </div>
+
                     <div class="form-group">
                         <label for="preco_venda">
                             <i class="fas fa-hand-holding-dollar" aria-hidden="true"></i>
-                            Preço de venda por Kg (R$) &mdash; opcional
+                            Preço de venda por kg (R$) &mdash; opcional
                         </label>
                         <div class="input-group tem-prefixo">
                             <span class="input-prefixo">R$</span>
@@ -232,7 +284,7 @@
                     <div class="history-header">
                         <div class="history-titulo">
                             <h2><i class="fas fa-history" aria-hidden="true"></i> Histórico de Cálculos</h2>
-                            <p class="header-sub">Aqui ficam seus cálculos salvos. Toque em um para ver os detalhes ou refazer o cálculo.</p>
+                            <p class="header-sub">Aqui ficam seus cálculos salvos. Clique ou toque em um para ver os detalhes ou refazer o cálculo.</p>
                         </div>
                         <div class="history-actions">
                             <button class="action-btn secondary" onclick="limparHistorico()">
@@ -282,10 +334,10 @@
 
                     <!-- Atalhos rapidos de periodo (preenchem De/Ate) -->
                     <div class="filtros-presets">
-                        <span class="presets-label"><i class="fas fa-bolt" aria-hidden="true"></i> Periodo:</span>
+                        <span class="presets-label"><i class="fas fa-bolt" aria-hidden="true"></i> Período:</span>
                         <button type="button" class="preset-btn" data-preset="hoje">Hoje</button>
                         <button type="button" class="preset-btn" data-preset="7dias">7 dias</button>
-                        <button type="button" class="preset-btn" data-preset="mes">Este mes</button>
+                        <button type="button" class="preset-btn" data-preset="mes">Este mês</button>
                     </div>
 
                     <!-- Chips de filtro ativo + contador de resultados -->
@@ -325,46 +377,20 @@
                 </div>
             </div>
 
-            <!-- Aba de Configuracoes: edita os precos dos insumos -->
+            <!-- Aba de Insumos: catálogo de tipos (gelo, papelão, fita, embalagem). -->
             <div class="tab-content" id="config-tab">
                 <div class="form-container">
                     <div class="form-header">
-                        <h2><i class="fas fa-gear" aria-hidden="true"></i> Configurações</h2>
-                        <p>Altere os preços dos insumos usados nos cálculos. Eles ficam salvos no banco.</p>
+                        <h2><i class="fas fa-boxes-stacked" aria-hidden="true"></i> Insumos</h2>
+                        <p>Cadastre os tipos de cada insumo e seus valores. Na calculadora você escolhe qual tipo usar em cada cálculo.</p>
                     </div>
                     <div class="aviso-config">
                         <i class="fas fa-triangle-exclamation" aria-hidden="true"></i>
-                        <span>Atenção: alterar estes preços muda o custo de <strong>todos os cálculos</strong> daqui pra frente. Só altere se tiver certeza do novo valor.</span>
+                        <span>Atenção: alterar o valor de um insumo muda o custo de <strong>todos os cálculos</strong> feitos com aquele tipo daqui pra frente. Só altere se tiver certeza do novo valor.</span>
                     </div>
-                    <form id="configForm" class="calc-form">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="cfg_gelo">
-                                    <i class="fas fa-snowflake" aria-hidden="true"></i>
-                                    Preço do saco de gelo (R$)
-                                </label>
-                                <input type="number" id="cfg_gelo" step="0.01" min="0" inputmode="decimal" placeholder="0.00" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="cfg_papelao">
-                                    <i class="fas fa-box" aria-hidden="true"></i>
-                                    Preço da caixa de papelão (R$)
-                                </label>
-                                <input type="number" id="cfg_papelao" step="0.01" min="0" inputmode="decimal" placeholder="0.00" required>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label for="cfg_fita">
-                                <i class="fas fa-tape" aria-hidden="true"></i>
-                                Preço da fita durex (R$)
-                            </label>
-                            <input type="number" id="cfg_fita" step="0.01" min="0" inputmode="decimal" placeholder="0.00" required>
-                        </div>
-                        <button type="submit" class="calculate-btn">
-                            <i class="fas fa-save" aria-hidden="true"></i>
-                            Salvar Configurações
-                        </button>
-                    </form>
+                    <!-- Preenchido dinamicamente por renderInsumosCatalogo() (script.js),
+                         uma seção por categoria, cada uma com lista editável + adicionar. -->
+                    <div id="insumosCatalogo"></div>
                 </div>
             </div>
 
@@ -384,27 +410,15 @@
 
                     <form id="formNovoProduto" class="produto-novo">
                         <input type="text" id="novoProdutoNome" placeholder="Nome do novo produto" aria-label="Nome do novo produto">
-                        <input type="number" id="novoProdutoPreco" step="0.01" min="0" inputmode="decimal" placeholder="Preço/Kg" aria-label="Preço por Kg do novo produto">
+                        <input type="number" id="novoProdutoPreco" step="0.01" min="0" inputmode="decimal" placeholder="Preço por kg" aria-label="Preço por kg do novo produto">
                         <button type="submit" class="action-btn primary">
                             <i class="fas fa-plus" aria-hidden="true"></i>
                             Adicionar produto
                         </button>
                     </form>
 
-                    <!-- Gerenciar tipos de embalagem (nome + valor). Ficam disponíveis no perfil do produto. -->
-                    <div class="produtos-section embalagens-section">
-                        <h3><i class="fas fa-box-open" aria-hidden="true"></i> Tipos de embalagem</h3>
-                        <p class="produtos-hint">Cadastre as embalagens e seus valores. No perfil de cada produto você escolhe qual embalagem ele usa.</p>
-                        <div id="listaEmbalagens" class="embalagens-lista"></div>
-                        <form id="formNovaEmbalagem" class="produto-novo">
-                            <input type="text" id="novaEmbalagemNome" placeholder="Nome da embalagem (ex.: Caixa 5kg)" aria-label="Nome da embalagem">
-                            <input type="number" id="novaEmbalagemValor" step="0.01" min="0" inputmode="decimal" placeholder="Valor (R$)" aria-label="Valor da embalagem">
-                            <button type="submit" class="action-btn primary">
-                                <i class="fas fa-plus" aria-hidden="true"></i>
-                                Adicionar embalagem
-                            </button>
-                        </form>
-                    </div>
+                    <!-- Os tipos de embalagem agora ficam na aba Insumos (categoria "embalagem"),
+                         junto com gelo, papelão e fita, num cadastro único. -->
                 </div>
             </div>
 
@@ -413,7 +427,7 @@
                 <div class="form-container">
                     <div class="form-header">
                         <h2><i class="fas fa-clipboard-list" aria-hidden="true"></i> Logs do sistema</h2>
-                        <p>Ocorrencias registradas: logins, tentativas falhas, acessos negados e erros.</p>
+                        <p>Ocorrências registradas: logins, tentativas falhas, acessos negados e erros.</p>
                     </div>
                     <div class="produtos-toolbar logs-toolbar">
                         <select id="logsFiltro" aria-label="Filtrar por tipo de ocorrencia">
@@ -425,8 +439,8 @@
                             <option value="config_alterada">Preço alterado</option>
                             <option value="historico_limpo">Histórico limpo</option>
                             <option value="erro">Erro</option>
-                            <option value="calculo_salvo">Calculo salvo</option>
-                            <option value="usuario_criado">Usuario criado</option>
+                            <option value="calculo_salvo">Cálculo salvo</option>
+                            <option value="usuario_criado">Usuário criado</option>
                         </select>
                         <label class="logs-data">De <input type="date" id="logsDe" aria-label="Logs a partir de"></label>
                         <label class="logs-data">Até <input type="date" id="logsAte" aria-label="Logs até"></label>
@@ -552,6 +566,44 @@
                         Entrar
                     </button>
                 </form>
+
+                <!-- 2º passo: verificação em duas etapas (2FA). Escondido até a senha passar. -->
+                <div id="twofaStep" hidden>
+                    <!-- Só aparece no primeiro login (configuração do 2FA) -->
+                    <div id="twofaSetup" hidden>
+                        <p class="login-hint">
+                            <i class="fas fa-shield-halved" aria-hidden="true"></i>
+                            Configure a verificação em duas etapas: escaneie o QR no seu app
+                            autenticador (Google Authenticator, Authy, etc.) ou digite o código manual.
+                        </p>
+                        <div id="twofaQr" class="twofa-qr" aria-hidden="true"></div>
+                        <p class="login-hint">Código manual: <code id="twofaSecret"></code></p>
+                    </div>
+                    <form id="twofaForm" class="calc-form">
+                        <div class="form-group">
+                            <label for="twofa_codigo">Código de 6 dígitos</label>
+                            <input type="text" id="twofa_codigo" inputmode="numeric"
+                                   autocomplete="one-time-code" maxlength="9" placeholder="000000" required>
+                        </div>
+                        <p id="twofaErro" class="login-erro" role="alert" hidden></p>
+                        <button type="submit" class="calculate-btn">
+                            <i class="fas fa-shield-halved" aria-hidden="true"></i>
+                            Verificar
+                        </button>
+                    </form>
+                    <!-- Só aparece no primeiro login, depois do código válido -->
+                    <div id="backupCodesBox" hidden>
+                        <p class="login-hint">
+                            <strong>Guarde estes códigos de backup</strong> num lugar seguro.
+                            Cada um funciona uma única vez, caso você perca o app. Não serão mostrados de novo.
+                        </p>
+                        <ul id="backupCodesList" class="backup-codes"></ul>
+                        <button type="button" id="btnBackupOk" class="calculate-btn">
+                            <i class="fas fa-check" aria-hidden="true"></i>
+                            Já guardei — entrar
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -574,7 +626,7 @@
                             <input type="text" id="perfil_nome" required>
                         </div>
                         <div class="form-group">
-                            <label for="perfil_preco">Preço por Kg (R$)</label>
+                            <label for="perfil_preco">Preço por kg (R$)</label>
                             <div class="input-group tem-prefixo">
                                 <span class="input-prefixo">R$</span>
                                 <input type="number" id="perfil_preco" step="0.01" min="0" inputmode="decimal">
@@ -625,17 +677,17 @@
                                 <option value="Unidade">Unidade</option>
                                 <option value="Pacote">Pacote</option>
                                 <option value="Caixa">Caixa</option>
-                                <option value="Kg">Kg</option>
+                                <option value="Kg">kg</option>
                             </select>
                         </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
-                            <label for="perfil_peso_unitario">Peso por unidade (Kg)</label>
+                            <label for="perfil_peso_unitario">Peso por unidade (kg)</label>
                             <div class="input-group tem-sufixo">
                                 <input type="number" id="perfil_peso_unitario" step="0.001" min="0" inputmode="decimal"
                                        placeholder="Ex.: 1" oninput="calcPesoTotalPerfil()">
-                                <span class="input-sufixo">Kg</span>
+                                <span class="input-sufixo">kg</span>
                             </div>
                         </div>
                         <div class="form-group">
@@ -658,7 +710,7 @@
                         <input type="text" id="loteCodigo" placeholder="Código (ex.: L2026-045)" aria-label="Código do lote">
                         <label class="lote-campo">Fab. <input type="date" id="loteFabricacao" aria-label="Fabricação"></label>
                         <label class="lote-campo">Val. <input type="date" id="loteValidade" aria-label="Validade"></label>
-                        <input type="number" id="loteQuantidade" step="0.01" min="0" inputmode="decimal" placeholder="Qtd (Kg)" aria-label="Quantidade">
+                        <input type="number" id="loteQuantidade" step="0.01" min="0" inputmode="decimal" placeholder="Qtd (kg)" aria-label="Quantidade">
                         <button type="submit" class="action-btn primary">
                             <i class="fas fa-plus" aria-hidden="true"></i> Adicionar lote
                         </button>
@@ -682,14 +734,14 @@
     </div>
 
     <script src="datepicker.js?v=15"></script>
-    <script src="melhorias.js?v=15"></script>
+    <script src="melhorias.js?v=16"></script>
     <script src="menu-hud.js?v=15"></script>
     <!-- Logica extraida do script.js (carregada antes dele) -->
-    <script src="calculo.js?v=15"></script>
-    <script src="validacao.js?v=15"></script>
-    <script src="script.js?v=26"></script>
+    <script src="calculo.js?v=17"></script>
+    <script src="validacao.js?v=16"></script>
+    <script src="script.js?v=30"></script>
     <!-- Carregados DEPOIS do script.js para sobrescrever a exportacao de PDF -->
-    <script src="pdf-relatorio.js?v=15"></script>
+    <script src="pdf-relatorio.js?v=16"></script>
     <script src="historico-selecao.js?v=15"></script>
 </body>
 </html>

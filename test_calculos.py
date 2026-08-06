@@ -47,19 +47,44 @@ def test_preco_invalido_levanta_erro():
 
 def test_todas_as_chaves_presentes():
     r = calcular_resultados(10, 100, 115, 3, 2)
-    esperadas = {"custo_sacos_gelo", "custo_papelao", "custo_fita_papelao", "diferenca_pesos",
-                 "custo_producao", "custo_pos_beneficiamento", "porcentagem", "diferenca_valor",
-                 "custos_totais", "custo_final"}
+    esperadas = {"custo_sacos_gelo", "custo_papelao", "custo_fita_papelao", "custo_embalagem",
+                 "diferenca_pesos", "custo_producao", "custo_pos_beneficiamento", "porcentagem",
+                 "diferenca_valor", "custos_totais", "custo_final"}
     assert set(r.keys()) == esperadas
 
 
+def test_embalagem_soma_ao_custo():
+    # sem embalagem: custo_embalagem = 0 e nao muda os totais
+    base = calcular_resultados(10, 100, 115, 3, 2)
+    assert base["custo_embalagem"] == 0
+
+    # com embalagem: 4 unidades x R$2,50 = R$10, somado a custos_totais e custo_final
+    com = calcular_resultados(10, 100, 115, 3, 2, preco_embalagem=2.5, qtd_embalagem=4)
+    assert com["custo_embalagem"] == pytest.approx(10.0)
+    assert com["custos_totais"] == pytest.approx(base["custos_totais"] + 10.0)
+    assert com["custo_final"] == pytest.approx(base["custo_final"] + 10.0)
+
+
 def test_margem_de_lucro():
-    # preco de venda R$12/Kg; custo pos-beneficiamento = 1000/115
+    # Lucro e medido contra o custo CHEIO por kg = custo_final / peso_final
+    # (materia-prima + todos os insumos), nao mais so a materia-prima.
     r = calcular_resultados(10, 100, 115, 3, 2, preco_venda=12)
-    custo_kg = 1000 / 115
+    custo_total_kg = r["custo_final"] / 115
     assert r["preco_venda"] == 12
-    assert r["lucro_por_kg"] == pytest.approx(12 - custo_kg)
-    assert r["margem_percentual"] == pytest.approx((12 - custo_kg) / 12 * 100)
+    assert r["custo_total_por_kg"] == pytest.approx(custo_total_kg)
+    assert r["lucro_por_kg"] == pytest.approx(12 - custo_total_kg)
+    assert r["margem_percentual"] == pytest.approx((12 - custo_total_kg) / 12 * 100)
+
+
+def test_insumos_e_embalagem_reduzem_a_margem():
+    # Mesmo preco de venda: adicionar embalagem AUMENTA o custo total por kg,
+    # logo DIMINUI o lucro por kg e a margem. (Antes, insumos nao afetavam o lucro.)
+    sem = calcular_resultados(10, 100, 115, 3, 2, preco_venda=12)
+    com = calcular_resultados(10, 100, 115, 3, 2, preco_venda=12,
+                              preco_embalagem=2.5, qtd_embalagem=4)
+    assert com["custo_total_por_kg"] > sem["custo_total_por_kg"]
+    assert com["lucro_por_kg"] < sem["lucro_por_kg"]
+    assert com["margem_percentual"] < sem["margem_percentual"]
 
 
 def test_sem_preco_venda_nao_gera_margem():

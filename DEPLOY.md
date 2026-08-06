@@ -56,6 +56,8 @@ os.environ['ADMIN_EMAIL'] = 'voce@exemplo.com'  # opcional
 os.environ['FRONTEND_URL'] = 'https://navarroarthur.github.io'
 # Caminho ABSOLUTO do banco (garante que ele persista sempre no mesmo lugar)
 os.environ['DATABASE_URL'] = '/home/SEU_USUARIO/Calculo_de_custos-main/calculos_beneficiamento.db'
+# (OPCIONAL) Monitoramento de erros no Sentry. Deixe comentado se não usar.
+# os.environ['SENTRY_DSN'] = 'https://...ingest.sentry.io/...'
 
 # --- Deixa o Python achar o api.py ---
 caminho = '/home/SEU_USUARIO/Calculo_de_custos-main'
@@ -116,7 +118,27 @@ No arquivo WSGI (Parte 1.6), o `FRONTEND_URL` deve ser a **origem** do site — 
 ## Parte 4 — Primeiro acesso e rotina
 
 - **Login:** abra o site, entre com o e-mail do admin e a `ADMIN_SENHA` que você pôs no WSGI.
-- **Backup:** em **Configurações → Backup do banco → Baixar backup (.db)**. Faça isso com frequência.
+- **Backup:** em **Logs → Backup do banco → Baixar backup (.db)**. Faça isso com frequência e guarde a cópia **fora** do servidor (no seu PC).
+
+---
+
+## 🧯 Parte 5 — Recuperação (restaurar um backup)
+
+Um backup que você nunca restaurou é só esperança. Teste o processo **antes** de precisar dele.
+
+O backup é uma cópia do arquivo `.db`. Para voltar a partir de um backup:
+
+1. **Pare a API.** Na aba **Web** do PythonAnywhere, o app não pode estar escrevendo no banco durante a troca. (Localmente, é só não estar com o servidor rodando.)
+2. **Rode o script de restauração**, passando o arquivo de backup:
+   ```bash
+   python restaurar_backup.py caminho/do/backup.db
+   ```
+   Ele confere a integridade do backup (`PRAGMA integrity_check`), **salva o banco atual** como `pre_restauracao_<data>.db` (rede de segurança), copia o backup por cima e confere a integridade de novo. Se o backup estiver corrompido, ele **aborta** sem tocar no banco atual.
+3. **Suba a API de novo** (botão **Reload** na aba Web) e confirme em `/api/health` e no login.
+
+> Teste isto pelo menos uma vez com um backup real, restaurando num arquivo de lado
+> (`python restaurar_backup.py backup.db` apontando `DATABASE_URL` para um `.db` de teste),
+> para ter certeza de que sabe fazer o caminho de volta.
 
 ---
 
@@ -157,4 +179,7 @@ No plano grátis, o PythonAnywhere pede para você **renovar o web app a cada ~3
 - [ ] `FRONTEND_URL` no WSGI = origem do GitHub Pages.
 - [ ] `DATABASE_URL` no WSGI = caminho absoluto do `.db`.
 - [ ] `https://.../api/health` responde e o login funciona.
-- [ ] Primeiro backup baixado e guardado.
+- [ ] Primeiro backup baixado e guardado **fora** do servidor.
+- [ ] Restauração testada ao menos uma vez (`restaurar_backup.py` num `.db` de teste).
+- [ ] Senha do admin forte (mín. 8, não é só números nem uma senha óbvia).
+- [ ] (Opcional) `SENTRY_DSN` no WSGI, se quiser monitorar erros.

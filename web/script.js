@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // CONFIGURACAO DA API
-// Um unico lugar para a URL do back-end. Em producao, TROQUE a linha abaixo
-// pela URL real do seu deploy no Railway (ex.: https://seuapp.up.railway.app/api).
+// Um unico lugar para a URL do back-end. Em producao, esta e a URL da API no
+// PythonAnywhere (ex.: https://SEU_USUARIO.pythonanywhere.com/api).
 // ---------------------------------------------------------------------------
 const PRODUCTION_API_URL = 'https://arthur.pythonanywhere.com/api'; 
 const rodandoLocal = ['localhost', '127.0.0.1'].includes(window.location.hostname);
@@ -13,8 +13,15 @@ const API_BASE_URL = rodandoLocal ? 'http://localhost:5000/api' : PRODUCTION_API
 let PRECOS = { GELO: 8.5, PAPELAO: 7.3, FITA: 0.34 };
 // Lista de produtos vinda do banco (id, nome, preco_kg)
 let PRODUTOS = [];
-// Tipos de embalagem cadastrados (id, nome, valor)
+// Tipos de embalagem cadastrados (id, nome, valor) — derivado de INSUMOS (categoria 'embalagem'),
+// mantido para o select do perfil do produto e da calculadora continuarem funcionando.
 let EMBALAGENS = [];
+// Catálogo completo de insumos (id, nome, valor, categoria) vindo de /api/insumos.
+let INSUMOS = [];
+// Estado do login em duas etapas (2FA): token do 1º passo e sessão aguardando o
+// usuário confirmar que guardou os códigos de backup.
+let PRE_TOKEN_2FA = null;
+let SESSAO_PENDENTE = null;
 
 // ---------------------------------------------------------------------------
 // AUTENTICACAO: intercepta as chamadas da API para anexar o token e tratar 401
@@ -80,9 +87,8 @@ function inicializarEventos() {
     form.addEventListener('submit', handleSubmit);
     closeResult.addEventListener('click', fecharResultado);
 
-    // Formulario de configuracoes (editar precos)
-    const configForm = document.getElementById('configForm');
-    if (configForm) configForm.addEventListener('submit', handleConfigSubmit);
+    // A aba Insumos usa formulários criados dinamicamente (onsubmit inline em
+    // renderInsumosCatalogo), então não há binding fixo aqui.
 
     // Busca por produto: debounce de 250ms para nao re-renderizar a lista a
     // cada tecla digitada (roda so quando o usuario para de digitar).
@@ -96,7 +102,7 @@ function inicializarEventos() {
     const btnLimparFiltros = document.getElementById('btnLimparFiltros');
     if (btnLimparFiltros) btnLimparFiltros.addEventListener('click', limparFiltros);
 
-    // Ao escolher um produto, preenche o preco por Kg com o valor salvo
+    // Ao escolher um produto, preenche o preco por kg com o valor salvo
     if (campos.produto) campos.produto.addEventListener('change', autoPreencherPreco);
     // Formulario de adicionar produto (na aba Configuracoes)
     const formNovoProduto = document.getElementById('formNovoProduto');
@@ -130,6 +136,11 @@ function inicializarEventos() {
     // Login, logout e backup
     const loginForm = document.getElementById('loginForm');
     if (loginForm) loginForm.addEventListener('submit', fazerLogin);
+    // 2FA: form do código (2º passo) e botão de "já guardei os códigos de backup"
+    const twofaForm = document.getElementById('twofaForm');
+    if (twofaForm) twofaForm.addEventListener('submit', verificar2FA);
+    const btnBackupOk = document.getElementById('btnBackupOk');
+    if (btnBackupOk) btnBackupOk.addEventListener('click', finalizarLogin);
     // Botao de mostrar/ocultar a senha
     const toggleSenha = document.getElementById('toggleSenha');
     if (toggleSenha) toggleSenha.addEventListener('click', alternarSenha);
@@ -155,9 +166,6 @@ function inicializarEventos() {
     // Usuarios: criar novo
     const formUsuario = document.getElementById('formNovoUsuario');
     if (formUsuario) formUsuario.addEventListener('submit', criarUsuarioAdmin);
-    // Embalagens: adicionar nova
-    const formEmb = document.getElementById('formNovaEmbalagem');
-    if (formEmb) formEmb.addEventListener('submit', adicionarEmbalagem);
     // Lotes: adicionar novo (form dentro do modal de perfil)
     const formLote = document.getElementById('formNovoLote');
     if (formLote) formLote.addEventListener('submit', adicionarLote);
@@ -247,6 +255,7 @@ function exibirResultados(dados, resultados) {
         custo_sacos_gelo,
         custo_papelao,
         custo_fita_papelao,
+        custo_embalagem = 0,
         diferenca_pesos,
         custo_producao,
         custo_pos_beneficiamento,
@@ -270,7 +279,7 @@ function exibirResultados(dados, resultados) {
                         <i class="fas fa-coins"></i>
                     </div>
                     <div class="result-card-value">R$ ${resultados.lucro_por_kg.toFixed(2)}</div>
-                    <div class="result-card-label">Lucro por Kg</div>
+                    <div class="result-card-label">Lucro por kg</div>
                 </div>
                 <div class="result-card">
                     <div class="result-card-icon ${resultados.margem_percentual >= 0 ? 'success' : 'warning'}">
@@ -282,12 +291,12 @@ function exibirResultados(dados, resultados) {
             </div>
             <div class="detail-list">
                 <div class="detail-item">
-                    <span class="detail-item-label">Preço de venda por Kg</span>
+                    <span class="detail-item-label">Preço de venda por kg</span>
                     <span class="detail-item-value">R$ ${resultados.preco_venda.toFixed(2)}</span>
                 </div>
                 <div class="detail-item">
-                    <span class="detail-item-label">Custo por Kg (pós-beneficiamento)</span>
-                    <span class="detail-item-value">R$ ${custo_pos_beneficiamento.toFixed(2)}</span>
+                    <span class="detail-item-label" title="Matéria-prima + todos os insumos (gelo, papelão, fita, embalagem), por kg do peso final. É a base do lucro.">Custo total por kg</span>
+                    <span class="detail-item-value">R$ ${resultados.custo_total_por_kg.toFixed(2)}</span>
                 </div>
             </div>
         </div>
@@ -298,11 +307,11 @@ function exibirResultados(dados, resultados) {
             <div class="result-header-info">
                 <div class="result-product">
                     <i class="fas fa-fish"></i>
-                    <span>${produto}</span>
+                    <span>${esc(produto)}</span>
                 </div>
                 <div class="result-category ${categoriaColor}">
                     <i class="${categoriaIcon}"></i>
-                    <span>${categoria}</span>
+                    <span>${esc(categoria)}</span>
                 </div>
             </div>
         </div>
@@ -320,7 +329,7 @@ function exibirResultados(dados, resultados) {
                 <div class="result-card-icon success">
                     <i class="fas fa-weight-hanging"></i>
                 </div>
-                <div class="result-card-value">+${arredondar(diferenca_pesos)} Kg</div>
+                <div class="result-card-value">+${arredondar(diferenca_pesos)} kg</div>
                 <div class="result-card-label">Ganho de Peso</div>
             </div>
             
@@ -329,7 +338,7 @@ function exibirResultados(dados, resultados) {
                     <i class="fas fa-dollar-sign"></i>
                 </div>
                 <div class="result-card-value">R$ ${custo_pos_beneficiamento.toFixed(2)}</div>
-                <div class="result-card-label">Custo por Kg</div>
+                <div class="result-card-label">Custo por kg</div>
             </div>
             
             <div class="result-card">
@@ -353,9 +362,14 @@ function exibirResultados(dados, resultados) {
                     <span class="detail-item-value">R$ ${custo_papelao.toFixed(2)}</span>
                 </div>
                 <div class="detail-item">
-                    <span class="detail-item-label">Fitas durex</span>
+                    <span class="detail-item-label">Fita adesiva</span>
                     <span class="detail-item-value">R$ ${custo_fita_papelao.toFixed(2)}</span>
                 </div>
+                ${custo_embalagem > 0 ? `
+                <div class="detail-item">
+                    <span class="detail-item-label">Embalagem</span>
+                    <span class="detail-item-value">R$ ${custo_embalagem.toFixed(2)}</span>
+                </div>` : ''}
                 <div class="detail-item" style="border-top: 2px solid var(--border-color); font-weight: 600;">
                     <span class="detail-item-label">Subtotal custos extras</span>
                     <span class="detail-item-value">R$ ${custos_totais.toFixed(2)}</span>
@@ -368,22 +382,22 @@ function exibirResultados(dados, resultados) {
             <div class="detail-list">
                 <div class="detail-item">
                     <span class="detail-item-label">Peso inicial</span>
-                    <span class="detail-item-value">${peso_inicial} Kg</span>
+                    <span class="detail-item-value">${peso_inicial} kg</span>
                 </div>
                 <div class="detail-item">
                     <span class="detail-item-label">Peso final</span>
-                    <span class="detail-item-value">${peso_final} Kg</span>
+                    <span class="detail-item-value">${peso_final} kg</span>
                 </div>
                 <div class="detail-item">
-                    <span class="detail-item-label">Preço inicial por Kg</span>
+                    <span class="detail-item-label">Preço inicial por kg</span>
                     <span class="detail-item-value">R$ ${dados.preco.toFixed(2)}</span>
                 </div>
                 <div class="detail-item">
-                    <span class="detail-item-label" title="Quanto custa cada quilo depois do beneficiamento.">Custo pós-beneficiamento por Kg</span>
+                    <span class="detail-item-label" title="Quanto custa cada quilo depois do beneficiamento.">Custo pós-beneficiamento por kg</span>
                     <span class="detail-item-value">R$ ${custo_pos_beneficiamento.toFixed(2)}</span>
                 </div>
                 <div class="detail-item">
-                    <span class="detail-item-label" title="Diferenca entre o preco inicial por Kg e o custo por Kg apos o processo.">Diferença de valor por Kg</span>
+                    <span class="detail-item-label" title="Diferenca entre o preco inicial por kg e o custo por kg apos o processo.">Diferença de valor por kg</span>
                     <span class="detail-item-value ${diferenca_valor >= 0 ? 'text-success' : 'text-error'}">R$ ${diferenca_valor.toFixed(2)}</span>
                 </div>
             </div>
@@ -552,50 +566,28 @@ async function carregarConfiguracoes() {
     }
 }
 
-// Preenche o formulario de configuracoes com os precos atuais (ja carregados em PRECOS)
-function preencherConfigForm() {
-    const g = document.getElementById('cfg_gelo');
-    const p = document.getElementById('cfg_papelao');
-    const f = document.getElementById('cfg_fita');
-    if (g) g.value = PRECOS.GELO;
-    if (p) p.value = PRECOS.PAPELAO;
-    if (f) f.value = PRECOS.FITA;
-}
-
-// Salva os novos precos no banco (PUT /api/configuracoes) e atualiza o fallback local
-async function handleConfigSubmit(event) {
-    event.preventDefault();
-    // Acao sensivel: estes precos afetam TODOS os calculos. Pede confirmacao.
-    if (!confirm('Isto vai alterar o custo de TODOS os cálculos daqui pra frente. Deseja salvar os novos preços?')) return;
-    const novos = {
-        preco_gelo: parseFloat(document.getElementById('cfg_gelo').value),
-        preco_papelao: parseFloat(document.getElementById('cfg_papelao').value),
-        preco_fita: parseFloat(document.getElementById('cfg_fita').value)
-    };
-    try {
-        const response = await fetch(`${API_BASE_URL}/configuracoes`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(novos)
-        });
-        if (!response.ok) throw new Error('Falha ao salvar configuracoes');
-        // Atualiza os precos usados no calculo offline tambem (mantem tudo em sincronia)
-        PRECOS.GELO = novos.preco_gelo;
-        PRECOS.PAPELAO = novos.preco_papelao;
-        PRECOS.FITA = novos.preco_fita;
-        mostrarToast('Configurações salvas com sucesso!', 'success');
-    } catch (error) {
-        console.error('Erro ao salvar configuracoes:', error);
-        mostrarToast('Erro ao salvar. A API está online?', 'error');
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Login, logout e backup
 // ---------------------------------------------------------------------------
 function mostrarLogin() {
+    resetLoginUI();   // sempre abre no passo 1 (e-mail + senha)
     const o = document.getElementById('loginOverlay');
     if (o) o.classList.remove('hidden');
+}
+
+// Volta o modal de login para o estado inicial (passo 1). Chamado ao abrir o
+// login e depois de um login concluído, para o próximo começar limpo.
+function resetLoginUI() {
+    const set = (id, hidden) => { const el = document.getElementById(id); if (el) el.hidden = hidden; };
+    set('loginForm', false);
+    set('twofaStep', true);
+    set('twofaForm', false);
+    set('twofaSetup', true);
+    set('backupCodesBox', true);
+    const cod = document.getElementById('twofa_codigo'); if (cod) cod.value = '';
+    const qr = document.getElementById('twofaQr'); if (qr) qr.innerHTML = '';
+    limparErroLogin();
 }
 
 function esconderLogin() {
@@ -638,6 +630,8 @@ function limparErroLogin() {
     if (el) { el.textContent = ''; el.hidden = true; }
 }
 
+// 1º passo: e-mail + senha. Se a senha estiver certa, o servidor NÃO entrega a
+// sessão ainda — pede o 2FA. Guardamos o pré-token e mostramos o passo do código.
 async function fazerLogin(event) {
     event.preventDefault();
     limparErroLogin();   // limpa erro de tentativa anterior
@@ -652,14 +646,9 @@ async function fazerLogin(event) {
         // Se a resposta não for JSON válido, usa objeto vazio para não quebrar
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok) throw new Error(data.error || 'E-mail ou senha inválidos');
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('papel', data.papel || 'leitura');  // guarda o papel p/ a UI
-        localStorage.setItem('permissoes', JSON.stringify(data.permissoes || []));  // abas liberadas
+        PRE_TOKEN_2FA = data.pre_token;             // usado no 2º passo
         document.getElementById('login_senha').value = '';
-        esconderLogin();
-        switchTab('calculator');   // ao logar, sempre cai na Calculadora
-        mostrarToast(`Bem-vindo, ${data.nome}!`, 'success');
-        inicializarSistema();
+        mostrarPasso2FA(data);
     } catch (error) {
         // "Failed to fetch" = servidor fora do ar / sem internet
         const msg = (error.message === 'Failed to fetch')
@@ -667,6 +656,81 @@ async function fazerLogin(event) {
             : error.message;
         mostrarErroLogin(msg);   // mensagem visível dentro da caixa de login
     }
+}
+
+// Mostra o passo do 2FA. No primeiro login (needs_2fa_setup), exibe o QR + o
+// segredo para o usuário cadastrar no app autenticador; depois, só o campo do código.
+function mostrarPasso2FA(data) {
+    document.getElementById('loginForm').hidden = true;
+    limparErroLogin();
+    document.getElementById('twofaStep').hidden = false;
+    const setup = document.getElementById('twofaSetup');
+    if (data.needs_2fa_setup) {
+        setup.hidden = false;
+        document.getElementById('twofaSecret').textContent = data.secret || '';
+        const qr = document.getElementById('twofaQr');
+        qr.innerHTML = '';
+        // QRCode vem da lib qrcodejs (CDN). Se faltar, o usuário ainda pode usar o
+        // segredo manual acima — por isso o QR é um "extra", não um bloqueio.
+        if (window.QRCode && data.otpauth_uri) {
+            try { new QRCode(qr, { text: data.otpauth_uri, width: 180, height: 180 }); } catch (e) { }
+        }
+    } else {
+        setup.hidden = true;
+    }
+    const cod = document.getElementById('twofa_codigo');
+    if (cod) cod.focus();
+}
+
+// 2º passo: envia o código (do app ou de backup) e recebe o token de sessão.
+async function verificar2FA(event) {
+    event.preventDefault();
+    const elErro = document.getElementById('twofaErro');
+    if (elErro) elErro.hidden = true;
+    const codigo = document.getElementById('twofa_codigo').value.trim();
+    try {
+        const resp = await fetch(`${API_BASE_URL}/login/2fa`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pre_token: PRE_TOKEN_2FA, codigo })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.error || 'Código inválido');
+        SESSAO_PENDENTE = data;
+        // Se for o primeiro login, vieram códigos de backup: mostra ANTES de entrar.
+        if (data.backup_codes && data.backup_codes.length) {
+            mostrarBackupCodes(data.backup_codes);
+        } else {
+            finalizarLogin();
+        }
+    } catch (error) {
+        if (elErro) { elErro.textContent = error.message; elErro.hidden = false; }
+    }
+}
+
+// Mostra os códigos de backup uma única vez, obrigando o usuário a confirmar que
+// guardou antes de entrar (o botão chama finalizarLogin).
+function mostrarBackupCodes(codes) {
+    document.getElementById('twofaForm').hidden = true;
+    document.getElementById('twofaSetup').hidden = true;
+    document.getElementById('backupCodesList').innerHTML =
+        codes.map(c => `<li>${esc(c)}</li>`).join('');
+    document.getElementById('backupCodesBox').hidden = false;
+}
+
+// Efetiva a sessão: guarda o token e entra no sistema.
+function finalizarLogin() {
+    const data = SESSAO_PENDENTE || {};
+    SESSAO_PENDENTE = null;
+    PRE_TOKEN_2FA = null;
+    localStorage.setItem('token', data.token);
+    localStorage.setItem('papel', data.papel || 'leitura');
+    localStorage.setItem('permissoes', JSON.stringify(data.permissoes || []));
+    resetLoginUI();
+    esconderLogin();
+    switchTab('calculator');   // ao logar, sempre cai na Calculadora
+    mostrarToast(`Bem-vindo, ${data.nome}!`, 'success');
+    inicializarSistema();
 }
 
 function logout() {
@@ -728,36 +792,52 @@ async function carregarProdutos() {
             PRODUTOS = data.produtos;
             popularSelectProdutos();
             renderListaProdutos();
-            await carregarEmbalagens();
+            await carregarInsumos();
         }
     } catch (error) {
         console.warn('⚠️ Erro ao carregar produtos (mantendo lista fixa):', error);
     }
 }
 
-// --- Tipos de embalagem ----------------------------------------------------
-async function carregarEmbalagens() {
+// --- Catálogo de insumos (gelo, papelão, fita, embalagem) ------------------
+// Categorias exibidas na aba Insumos e usadas para popular os selects da calculadora.
+const CATEGORIAS_INSUMO = [
+    { chave: 'gelo', titulo: 'Gelo', icone: 'fa-snowflake' },
+    { chave: 'papelao', titulo: 'Caixas de papelão', icone: 'fa-box' },
+    { chave: 'fita', titulo: 'Fita', icone: 'fa-tape' },
+    { chave: 'embalagem', titulo: 'Embalagens', icone: 'fa-box-open' },
+];
+
+async function carregarInsumos() {
     try {
-        const resp = await fetch(`${API_BASE_URL}/embalagens`);
+        const resp = await fetch(`${API_BASE_URL}/insumos`);
         if (!resp.ok) throw new Error('Falha');
         const data = await resp.json();
-        EMBALAGENS = data.embalagens || [];
-        renderEmbalagens();
-        popularSelectEmbalagem();
+        INSUMOS = data.insumos || [];
     } catch (e) {
-        console.warn('⚠️ Erro ao carregar embalagens:', e);
+        console.warn('⚠️ Erro ao carregar insumos:', e);
+        INSUMOS = [];
     }
+    // Embalagem é uma categoria de insumo; o perfil do produto ainda usa EMBALAGENS.
+    EMBALAGENS = INSUMOS.filter(i => i.categoria === 'embalagem');
+    renderInsumosCatalogo();      // aba Insumos
+    popularSelectEmbalagem();     // selects de embalagem (perfil do produto + calculadora)
+    popularSelectsInsumos();      // selects de tipo na calculadora (gelo/papelão/fita)
 }
 
-// Preenche o <select> de tipo de embalagem no perfil do produto
+// Preenche os <select> de tipo de embalagem (perfil do produto E calculadora).
+// Ambos usam a mesma lista de embalagens cadastradas.
 function popularSelectEmbalagem() {
-    const sel = document.getElementById('perfil_embalagem');
-    if (!sel) return;
-    const atual = sel.value;
-    sel.innerHTML = '<option value="">— Nenhuma —</option>' +
+    const opcoes = '<option value="">— Nenhuma —</option>' +
         EMBALAGENS.map(e =>
             `<option value="${e.id}">${esc(e.nome)} (R$ ${Number(e.valor).toFixed(2)})</option>`).join('');
-    if (atual) sel.value = atual;
+    ['perfil_embalagem', 'calc_embalagem'].forEach(id => {
+        const sel = document.getElementById(id);
+        if (!sel) return;
+        const atual = sel.value;   // preserva a escolha ao repovoar
+        sel.innerHTML = opcoes;
+        if (atual) sel.value = atual;
+    });
 }
 
 // Preenche as datalists de categoria e fornecedor com os valores JÁ cadastrados
@@ -795,69 +875,97 @@ function initCombobox(inputId, boxId, getOpcoes) {
     });
 }
 
-// Renderiza a lista editável de embalagens (nome + valor, com Salvar e Remover)
-function renderEmbalagens() {
-    const cont = document.getElementById('listaEmbalagens');
+// Renderiza a aba Insumos: uma seção por categoria, cada uma com a lista editável
+// (nome + valor, Salvar/Remover) e um formulário para adicionar um novo tipo.
+function renderInsumosCatalogo() {
+    const cont = document.getElementById('insumosCatalogo');
     if (!cont) return;
-    if (!EMBALAGENS.length) {
-        cont.innerHTML = '<p class="produtos-hint">Nenhuma embalagem cadastrada ainda.</p>';
-        return;
-    }
-    cont.innerHTML = EMBALAGENS.map(e => `
-        <div class="embalagem-item" data-id="${e.id}">
-            <input type="text" class="emb-nome" value="${esc(e.nome)}" aria-label="Nome da embalagem">
-            <input type="number" class="emb-valor" value="${e.valor}" step="0.01" min="0" inputmode="decimal" aria-label="Valor">
-            <button type="button" class="btn-produto btn-salvar" onclick="salvarEmbalagem(${e.id})">
-                <i class="fas fa-save" aria-hidden="true"></i> Salvar
-            </button>
-            <button type="button" class="btn-produto btn-excluir" onclick="removerEmbalagem(${e.id})">
-                <i class="fas fa-trash" aria-hidden="true"></i>
-            </button>
-        </div>`).join('');
+    cont.innerHTML = CATEGORIAS_INSUMO.map(cat => {
+        const itens = INSUMOS.filter(i => i.categoria === cat.chave);
+        const linhas = itens.length ? itens.map(i => `
+            <div class="insumo-item" data-id="${i.id}">
+                <input type="text" class="ins-nome" value="${esc(i.nome)}" aria-label="Nome do insumo">
+                <input type="number" class="ins-valor" value="${i.valor}" step="0.01" min="0" inputmode="decimal" aria-label="Valor">
+                <button type="button" class="btn-produto btn-salvar" onclick="salvarInsumo(${i.id})">
+                    <i class="fas fa-save" aria-hidden="true"></i> Salvar
+                </button>
+                <button type="button" class="btn-produto btn-excluir" onclick="removerInsumo(${i.id})">
+                    <i class="fas fa-trash" aria-hidden="true"></i>
+                </button>
+            </div>`).join('') : '<p class="produtos-hint">Nenhum tipo cadastrado ainda.</p>';
+        return `
+            <div class="produtos-section">
+                <h3><i class="fas ${cat.icone}" aria-hidden="true"></i> ${cat.titulo}</h3>
+                <div class="insumos-lista">${linhas}</div>
+                <form class="produto-novo" onsubmit="adicionarInsumo(event, '${cat.chave}')">
+                    <input type="text" class="novo-ins-nome" placeholder="Nome do tipo (ex.: Caixa 5kg)" aria-label="Nome do novo tipo">
+                    <input type="number" class="novo-ins-valor" step="0.01" min="0" inputmode="decimal" placeholder="Valor (R$)" aria-label="Valor">
+                    <button type="submit" class="action-btn primary">
+                        <i class="fas fa-plus" aria-hidden="true"></i> Adicionar
+                    </button>
+                </form>
+            </div>`;
+    }).join('');
 }
 
-async function adicionarEmbalagem(event) {
+// Preenche os selects de TIPO da calculadora (gelo/papelão/fita) com os insumos
+// de cada categoria. Sem "nenhum": cada categoria tem ao menos o tipo padrão.
+function popularSelectsInsumos() {
+    [['gelo_insumo_id', 'gelo'], ['papelao_insumo_id', 'papelao'], ['fita_insumo_id', 'fita']].forEach(([selId, cat]) => {
+        const sel = document.getElementById(selId);
+        if (!sel) return;
+        const itens = INSUMOS.filter(i => i.categoria === cat);
+        const atual = sel.value;   // preserva a escolha ao repovoar
+        sel.innerHTML = itens.map(i =>
+            `<option value="${i.id}">${esc(i.nome)} (R$ ${Number(i.valor).toFixed(2)})</option>`).join('');
+        if (atual && itens.some(i => String(i.id) === String(atual))) sel.value = atual;
+    });
+}
+
+async function adicionarInsumo(event, categoria) {
     event.preventDefault();
-    const nome = document.getElementById('novaEmbalagemNome').value.trim();
-    const valor = parseFloat(document.getElementById('novaEmbalagemValor').value) || 0;
-    if (!nome) { mostrarToast('Informe o nome da embalagem.', 'warning'); return; }
+    const form = event.target;
+    const nome = form.querySelector('.novo-ins-nome').value.trim();
+    const valor = parseFloat(form.querySelector('.novo-ins-valor').value) || 0;
+    if (!nome) { mostrarToast('Informe o nome do insumo.', 'warning'); return; }
     try {
-        const resp = await fetch(`${API_BASE_URL}/embalagens`, {
+        const resp = await fetch(`${API_BASE_URL}/insumos`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nome, valor })
+            body: JSON.stringify({ nome, valor, categoria })
         });
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok) throw new Error(data.error || 'Falha ao adicionar');
-        document.getElementById('formNovaEmbalagem').reset();
-        mostrarToast('Embalagem adicionada!', 'success');
-        carregarEmbalagens();
+        mostrarToast('Insumo adicionado!', 'success');
+        carregarInsumos();
     } catch (e) { mostrarToast(e.message, 'error'); }
 }
 
-async function salvarEmbalagem(id) {
-    const row = document.querySelector(`.embalagem-item[data-id="${id}"]`);
+async function salvarInsumo(id) {
+    const row = document.querySelector(`.insumo-item[data-id="${id}"]`);
     if (!row) return;
-    const nome = row.querySelector('.emb-nome').value.trim();
-    const valor = parseFloat(row.querySelector('.emb-valor').value) || 0;
+    const nome = row.querySelector('.ins-nome').value.trim();
+    const valor = parseFloat(row.querySelector('.ins-valor').value) || 0;
+    // Ação sensível: mudar o valor afeta os próximos cálculos feitos com este tipo.
+    if (!confirm('Alterar este insumo muda o custo dos próximos cálculos feitos com ele. Salvar?')) return;
     try {
-        const resp = await fetch(`${API_BASE_URL}/embalagens/${id}`, {
+        const resp = await fetch(`${API_BASE_URL}/insumos/${id}`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ nome, valor })
         });
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok) throw new Error(data.error || 'Falha ao salvar');
-        mostrarToast('Embalagem salva!', 'success');
-        carregarEmbalagens();
+        mostrarToast('Insumo salvo!', 'success');
+        carregarInsumos();
     } catch (e) { mostrarToast(e.message, 'error'); }
 }
 
-async function removerEmbalagem(id) {
-    if (!confirm('Remover esta embalagem? Os produtos que a usam ficarão sem embalagem.')) return;
+async function removerInsumo(id) {
+    if (!confirm('Remover este insumo? Cálculos antigos não mudam; produtos que usam esta embalagem ficam sem ela.')) return;
     try {
-        const resp = await fetch(`${API_BASE_URL}/embalagens/${id}`, { method: 'DELETE' });
+        const resp = await fetch(`${API_BASE_URL}/insumos/${id}`, { method: 'DELETE' });
         if (!resp.ok) throw new Error('Falha ao remover');
-        mostrarToast('Embalagem removida.', 'success');
-        carregarEmbalagens();
+        mostrarToast('Insumo removido.', 'success');
+        carregarInsumos();
     } catch (e) { mostrarToast('Não foi possível remover.', 'error'); }
 }
 
@@ -871,7 +979,7 @@ function popularSelectProdutos() {
     if (selecionado) select.value = selecionado;   // mantem a escolha anterior
 }
 
-// Ao escolher um produto, preenche o preco por Kg com o valor salvo (se houver)
+// Ao escolher um produto, preenche o preco por kg com o valor salvo (se houver)
 function autoPreencherPreco() {
     const produto = PRODUTOS.find(p => p.nome === campos.produto.value);
     if (produto && produto.preco_kg > 0) {
@@ -911,7 +1019,7 @@ function renderListaProdutos() {
         return `
         <div class="produto-item" data-id="${p.id}">
             <input type="text" class="produto-nome" value="${esc(p.nome)}" aria-label="Nome do produto">
-            <input type="number" class="produto-preco" value="${p.preco_kg}" step="0.01" min="0" inputmode="decimal" aria-label="Preço por Kg">
+            <input type="number" class="produto-preco" value="${p.preco_kg}" step="0.01" min="0" inputmode="decimal" aria-label="Preço por kg">
             ${alerta}
             <button type="button" class="btn-produto btn-salvar" onclick="salvarProduto(${p.id})">
                 <i class="fas fa-save" aria-hidden="true"></i> Salvar
@@ -1065,7 +1173,7 @@ function renderLotes(lotes) {
             <input type="text" class="lote-cod" value="${esc(l.codigo || '')}" placeholder="Código" aria-label="Código do lote">
             <label class="lote-campo">Fab. <input type="date" class="lote-fab" value="${l.fabricacao || ''}"></label>
             <label class="lote-campo">Val. <input type="date" class="lote-val" value="${l.validade || ''}"></label>
-            <input type="number" class="lote-qtd" value="${l.quantidade ?? ''}" step="0.01" min="0" inputmode="decimal" placeholder="Kg" aria-label="Quantidade">
+            <input type="number" class="lote-qtd" value="${l.quantidade ?? ''}" step="0.01" min="0" inputmode="decimal" placeholder="kg" aria-label="Quantidade">
             <button type="button" class="btn-produto btn-salvar" onclick="salvarLote(${l.id})"><i class="fas fa-save" aria-hidden="true"></i></button>
             <button type="button" class="btn-produto btn-excluir" onclick="removerLote(${l.id})"><i class="fas fa-trash" aria-hidden="true"></i></button>
         </div>`;
@@ -1188,7 +1296,7 @@ function calcPesoTotalPerfil() {
     if (pu > 0) totalKg = q * pu;
     else if (uni === 'Kg') totalKg = q;
     const out = document.getElementById('perfil_peso_total');
-    if (out) out.value = totalKg > 0 ? arredondar(totalKg, 3) + ' Kg' : '';
+    if (out) out.value = totalKg > 0 ? arredondar(totalKg, 3) + ' kg' : '';
 }
 
 async function salvarPerfilProduto() {
@@ -1257,6 +1365,8 @@ async function salvarNoBanco(dados) {
                 sacos_de_gelo: dados.sacos_de_gelo,
                 caixa_papelao: dados.caixa_papelao,
                 preco_venda: dados.preco_venda,
+                embalagem_id: dados.embalagem_id,
+                embalagem_qtd: dados.embalagem_qtd,
                 observacoes: 'Calculado via interface web'
             })
         });
@@ -1383,9 +1493,9 @@ function switchTab(tabId) {
     if (tabId === 'history') {
         atualizarHistorico();
     }
-    // Se for a aba de configuracoes, preencher com os precos atuais
+    // Se for a aba de Insumos, recarrega o catálogo (pega alterações recentes)
     if (tabId === 'config') {
-        preencherConfigForm();
+        carregarInsumos();
     }
     // Se for a aba de produtos, renderizar a lista
     if (tabId === 'produtos') {
@@ -1432,7 +1542,7 @@ function renderUsuarios(usuarios) {
         const controles = (u.papel === 'admin')
             ? `<span class="log-badge erro">Admin — acesso total</span>${semSenha}`
             : `<label><input type="checkbox" class="uperm" value="history" ${marc('history')}> Histórico</label>
-               <label><input type="checkbox" class="uperm" value="produtos" ${marc('produtos')}> Produtos</label>
+               <label><input type="checkbox" class="uperm" value="produtos" ${marc('produtos')}> Produtos e preços de insumo</label>
                <button type="button" class="btn-produto btn-salvar" onclick="salvarPermissoesUsuario(${u.id})">
                    <i class="fas fa-save" aria-hidden="true"></i> Salvar
                </button>${semSenha}`;
@@ -1500,8 +1610,8 @@ const LOG_TIPOS = {
     historico_limpo: { texto: 'Histórico limpo', cor: 'aviso' },
     logs_limpos:     { texto: 'Logs limpos',     cor: 'aviso' },
     erro:            { texto: 'Erro',            cor: 'erro'  },
-    calculo_salvo:   { texto: 'Calculo salvo',   cor: 'ok'    },
-    usuario_criado:  { texto: 'Usuario criado',  cor: 'ok'    }
+    calculo_salvo:   { texto: 'Cálculo salvo',   cor: 'ok'    },
+    usuario_criado:  { texto: 'Usuário criado',  cor: 'ok'    }
 };
 
 // Busca os logs no servidor (respeitando filtro de tipo e datas) e renderiza a lista.
@@ -1692,12 +1802,12 @@ function atualizarHistorico() {
                         <div class="history-summary-label">Beneficiamento</div>
                     </div>
                     <div class="history-summary-item">
-                        <div class="history-summary-value">+${arredondar(resultados.diferenca_pesos)} Kg</div>
+                        <div class="history-summary-value">+${arredondar(resultados.diferenca_pesos)} kg</div>
                         <div class="history-summary-label">Ganho</div>
                     </div>
                     <div class="history-summary-item">
                         <div class="history-summary-value">R$ ${resultados.custo_pos_beneficiamento.toFixed(2)}</div>
-                        <div class="history-summary-label">Custo/Kg</div>
+                        <div class="history-summary-label">Custo/kg</div>
                     </div>
                     <div class="history-summary-item">
                         <div class="history-summary-value">R$ ${resultados.custo_final.toFixed(2)}</div>

@@ -154,8 +154,8 @@ function desenharCard(doc, y, calculo) {
     const r = calculo.resultados;
     desenharMetricas(doc, y + 20, [
         { valor: (r.porcentagem || 0).toFixed(1) + '%', rotulo: 'Beneficiamento' },
-        { valor: '+' + arredondar(r.diferenca_pesos || 0) + ' Kg', rotulo: 'Ganho' },
-        { valor: pdfMoeda(r.custo_pos_beneficiamento), rotulo: 'Custo/Kg' },
+        { valor: '+' + arredondar(r.diferenca_pesos || 0) + ' kg', rotulo: 'Ganho' },
+        { valor: pdfMoeda(r.custo_pos_beneficiamento), rotulo: 'Custo/kg' },
         { valor: pdfMoeda(r.custo_final), rotulo: 'Total' },
     ], x + p, w - 2 * p);
 
@@ -217,14 +217,14 @@ function pdfDeCalculo(dados, resultados, nome) {
     y = desenharSecao(doc, y, 'Resultados Principais');
     y = desenharMetricas(doc, y, [
         { valor: resultados.porcentagem.toFixed(1) + '%', rotulo: 'Beneficiamento' },
-        { valor: '+' + arredondar(resultados.diferenca_pesos) + ' Kg', rotulo: 'Ganho de peso' },
-        { valor: pdfMoeda(resultados.custo_pos_beneficiamento), rotulo: 'Custo por Kg' },
+        { valor: '+' + arredondar(resultados.diferenca_pesos) + ' kg', rotulo: 'Ganho de peso' },
+        { valor: pdfMoeda(resultados.custo_pos_beneficiamento), rotulo: 'Custo por kg' },
     ], PAG.m, LARG);
     y += 6;
 
     y = desenharSecao(doc, y, 'Detalhamento dos Custos');
     y = desenharTabelaCustos(doc, y, [
-        { item: 'Peso inicial', qtd: dados.peso_inicial + ' Kg', unit: pdfMoeda(dados.preco), total: pdfMoeda(dados.peso_inicial * dados.preco) },
+        { item: 'Peso inicial', qtd: dados.peso_inicial + ' kg', unit: pdfMoeda(dados.preco), total: pdfMoeda(dados.peso_inicial * dados.preco) },
         { item: 'Sacos de gelo', qtd: dados.sacos_de_gelo + ' un.', unit: pdfMoeda(8.5), total: pdfMoeda(resultados.custo_sacos_gelo) },
         { item: 'Caixas de papelão', qtd: dados.caixa_papelao + ' un.', unit: pdfMoeda(7.3), total: pdfMoeda(resultados.custo_papelao) },
         { item: 'Fitas', qtd: dados.caixa_papelao + ' un.', unit: pdfMoeda(0.34), total: pdfMoeda(resultados.custo_fita_papelao) },
@@ -233,10 +233,10 @@ function pdfDeCalculo(dados, resultados, nome) {
     y += 6;
 
     y = desenharSecao(doc, y, 'Análise Financeira');
-    y = linhaKV(doc, y, 'Peso final', dados.peso_final + ' Kg');
-    y = linhaKV(doc, y, 'Preço inicial por Kg', pdfMoeda(dados.preco));
-    y = linhaKV(doc, y, 'Custo pós-beneficiamento por Kg', pdfMoeda(resultados.custo_pos_beneficiamento));
-    y = linhaKV(doc, y, 'Diferença de valor por Kg', pdfMoeda(resultados.diferenca_valor));
+    y = linhaKV(doc, y, 'Peso final', dados.peso_final + ' kg');
+    y = linhaKV(doc, y, 'Preço inicial por kg', pdfMoeda(dados.preco));
+    y = linhaKV(doc, y, 'Custo pós-beneficiamento por kg', pdfMoeda(resultados.custo_pos_beneficiamento));
+    y = linhaKV(doc, y, 'Diferença de valor por kg', pdfMoeda(resultados.diferenca_valor));
     // Total final destacado (verde)
     const h = 9;
     doc.setFillColor(231, 247, 239); doc.rect(PAG.m, y, LARG, h, 'F');
